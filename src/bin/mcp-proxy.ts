@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 
+import { EventSource } from "eventsource";
+
+// @ts-expect-error
+global.EventSource = EventSource;
+
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { proxyServer, startSSEServer } from "../MCPProxy.js";
-import { EventSource } from "eventsource";
 
-// @ts-expect-error
-global.EventSource = EventSource;
 
 const argv = await yargs(hideBin(process.argv))
   .scriptName("mcp-proxy")
