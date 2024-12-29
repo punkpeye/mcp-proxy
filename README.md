@@ -49,17 +49,17 @@ proxyServer({
 
 In this example, the server will proxy all requests to the client and vice versa.
 
-#### `startSseServer`
+#### `startSSEServer`
 
 Starts a proxy that listens on a `port` and `endpoint`, and sends messages to the attached server via `SSEServerTransport`.
 
 ```ts
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { startSseServer } from "mcp-proxy";
+import { startSSEServer } from "mcp-proxy";
 
 const server = new Server();
 
-const { close } = await startSseServer({
+const { close } = await startSSEServer({
   port: 8080,
   endpoint: "/sse",
   server,

@@ -5,7 +5,7 @@ import { hideBin } from "yargs/helpers";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { proxyServer, startSseServer } from "../MCPProxy.js";
+import { proxyServer, startSSEServer } from "../MCPProxy.js";
 
 const argv = await yargs(hideBin(process.argv))
   .scriptName("mcp-proxy")
@@ -75,7 +75,7 @@ proxyServer({
   serverCapabilities,
 });
 
-await startSseServer({
+await startSSEServer({
   server,
   port: argv.port,
   endpoint: argv.endpoint as `/${string}`,

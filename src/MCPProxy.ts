@@ -211,11 +211,11 @@ const startSending = async (transport: SSEServerTransport) => {
   }
 };
 
-export type SseServer = {
+export type SSEServer = {
   close: () => Promise<void>;
 };
 
-export const startSseServer = async ({
+export const startSSEServer = async ({
   port,
   server,
   endpoint,
@@ -223,7 +223,7 @@ export const startSseServer = async ({
   port: number;
   endpoint: string;
   server: Server;
-}): Promise<SseServer> => {
+}): Promise<SSEServer> => {
   const activeTransports: Record<string, SSEServerTransport> = {};
 
   /**

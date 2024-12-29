@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { it, expect } from "vitest";
-import { proxyServer, startSseServer } from "./MCPProxy.js";
+import { proxyServer, startSSEServer } from "./MCPProxy.js";
 import { getRandomPort } from "get-port-please";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { EventSource } from "eventsource";
@@ -47,7 +47,7 @@ it("proxies messages between SSE and stdio servers", async () => {
 
   const port = await getRandomPort();
 
-  await startSseServer({
+  await startSSEServer({
     server: sseServer,
     port,
     endpoint: "/sse",
