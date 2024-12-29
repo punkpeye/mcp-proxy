@@ -59,7 +59,7 @@ import { startSseServer } from "mcp-proxy";
 
 const server = new Server();
 
-const { close } = startSseServer({
+const { close } = await startSseServer({
   port: 8080,
   endpoint: "/sse",
   server,

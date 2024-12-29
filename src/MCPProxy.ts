@@ -211,7 +211,7 @@ const startSending = async (transport: SSEServerTransport) => {
   }
 };
 
-export const startSseServer = ({
+export const startSseServer = async ({
   port,
   server,
   endpoint,
