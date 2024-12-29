@@ -1,0 +1,71 @@
+{
+  "name": "mcp-proxy",
+  "version": "1.0.0",
+  "main": "dist/MCPProxy.js",
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run && tsc",
+    "format": "prettier --write . && eslint --fix ."
+  },
+  "bin": {
+    "mcp-proxy": "dist/bin/mcp-proxy.js"
+  },
+  "keywords": [
+    "MCP",
+    "SSE",
+    "proxy"
+  ],
+  "type": "module",
+  "author": "Frank Fiegel <frank@glama.ai>",
+  "license": "MIT",
+  "description": "A TypeScript SSE proxy for MCP servers that use stdio transport.",
+  "module": "dist/MCPProxy.js",
+  "types": "dist/MCPProxy.d.ts",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "fastmcp": "^1.5.9",
+    "yargs": "^17.7.2"
+  },
+  "repository": {
+    "url": "https://github.com/punkpeye/mcp-proxy"
+  },
+  "release": {
+    "branches": [
+      "main"
+    ],
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/npm",
+      "@semantic-release/github"
+    ]
+  },
+  "devDependencies": {
+    "@sebbo2002/semantic-release-jsr": "^2.0.2",
+    "@tsconfig/node22": "^22.0.0",
+    "@types/node": "^22.10.2",
+    "@types/yargs": "^17.0.33",
+    "eslint": "^9.17.0",
+    "eslint-plugin-perfectionist": "^4.4.0",
+    "eventsource": "^3.0.2",
+    "get-port-please": "^3.1.2",
+    "prettier": "^3.4.2",
+    "semantic-release": "^24.2.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "tsup": {
+    "entry": [
+      "src/MCPProxy.ts",
+      "src/bin/mcp-proxy.ts"
+    ],
+    "format": [
+      "esm"
+    ],
+    "dts": true,
+    "splitting": true,
+    "sourcemap": true,
+    "clean": true
+  }
+}
