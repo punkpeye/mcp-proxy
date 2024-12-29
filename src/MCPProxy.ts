@@ -230,6 +230,12 @@ export const startSSEServer = async ({
    * @author https://dev.classmethod.jp/articles/mcp-sse/
    */
   const httpServer = http.createServer(async (req, res) => {
+    if (req.method === "GET" && req.url === `/ping`) {
+      res.writeHead(200).end("pong");
+
+      return;
+    }
+
     if (req.method === "GET" && req.url === endpoint) {
       const transport = new SSEServerTransport("/messages", res);
 
