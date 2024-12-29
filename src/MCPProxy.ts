@@ -283,7 +283,7 @@ export const startSSEServer = async ({
     res.writeHead(404).end();
   });
 
-  httpServer.listen(port, "0.0.0.0");
+  httpServer.listen(port, "::");
 
   console.error(
     `server is running on SSE at http://localhost:${port}${endpoint}`,
