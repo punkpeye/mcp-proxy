@@ -210,7 +210,8 @@ export type SSEServer = {
 };
 
 type ServerLike = {
-  connect: Server['connect'];
+  connect: Server["connect"];
+  close: Server["close"];
 };
 
 export const startSSEServer = async <T extends ServerLike>({
