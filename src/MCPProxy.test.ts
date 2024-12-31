@@ -8,8 +8,10 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { EventSource } from "eventsource";
 import { setTimeout as delay } from "node:timers/promises";
 
-// @ts-expect-error - figure out how to use --experimental-eventsource with vitest
-global.EventSource = EventSource;
+if (!('EventSource' in global)) {
+  // @ts-expect-error - figure out how to use --experimental-eventsource with vitest
+  global.EventSource = EventSource;
+}
 
 it("proxies messages between SSE and stdio servers", async () => {
   const stdioTransport = new StdioClientTransport({
