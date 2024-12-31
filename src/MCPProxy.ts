@@ -216,14 +216,18 @@ export const startSSEServer = async <T extends ServerLike>({
 
       onConnect?.(server);
 
-      res.on("close", () => {
-        console.log("SSE connection closed");
+      res.on("close", async () => {
+        try {
+          await server.close();
+        } catch (error) {
+          console.error("Error closing server:", error);
+        }
 
         delete activeTransports[transport.sessionId];
 
         onClose?.(server);
       });
-      
+
       return;
     }
 
@@ -257,10 +261,6 @@ export const startSSEServer = async <T extends ServerLike>({
   });
 
   httpServer.listen(port, "::");
-
-  console.error(
-    `server is running on SSE at http://localhost:${port}${endpoint}`,
-  );
 
   return {
     close: async () => {
