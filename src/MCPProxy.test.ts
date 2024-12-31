@@ -8,7 +8,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { EventSource } from "eventsource";
 import { setTimeout as delay } from "node:timers/promises";
 
-if (!('EventSource' in global)) {
+if (!("EventSource" in global)) {
   // @ts-expect-error - figure out how to use --experimental-eventsource with vitest
   global.EventSource = EventSource;
 }
@@ -38,23 +38,25 @@ it("proxies messages between SSE and stdio servers", async () => {
 
   const serverCapabilities = stdioClient.getServerCapabilities() as {};
 
-  const mcpSSEServer = new Server(serverVersion, {
-    capabilities: serverCapabilities,
-  });
-
-  proxyServer({
-    server: mcpSSEServer,
-    client: stdioClient,
-    serverCapabilities,
-  });
-
   const port = await getRandomPort();
 
   const onConnect = vi.fn();
   const onClose = vi.fn();
 
   await startSSEServer({
-    server: mcpSSEServer,
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+
+      proxyServer({
+        server: mcpServer,
+        client: stdioClient,
+        serverCapabilities,
+      });
+
+      return mcpServer;
+    },
     port,
     endpoint: "/sse",
     onConnect,

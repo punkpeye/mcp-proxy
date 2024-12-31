@@ -217,16 +217,16 @@ export type SSEServer = {
 
 export const startSSEServer = async ({
   port,
-  server,
+  createServer,
   endpoint,
   onConnect,
   onClose,
 }: {
   port: number;
   endpoint: string;
-  server: Server;
-  onConnect?: (transport: SSEServerTransport) => void;
-  onClose?: (transport: SSEServerTransport) => void;
+  createServer: (transport: SSEServerTransport) => Promise<Server>;
+  onConnect?: (server: Server) => void;
+  onClose?: (server: Server) => void;
 }): Promise<SSEServer> => {
   const activeTransports: Record<string, SSEServerTransport> = {};
 
@@ -243,18 +243,20 @@ export const startSSEServer = async ({
     if (req.method === "GET" && req.url === endpoint) {
       const transport = new SSEServerTransport("/messages", res);
 
+      const server = await createServer(transport);
+
       activeTransports[transport.sessionId] = transport;
 
       await server.connect(transport);
 
-      onConnect?.(transport);
+      onConnect?.(server);
 
       res.on("close", () => {
         console.log("SSE connection closed");
 
         delete activeTransports[transport.sessionId];
 
-        onClose?.(transport);
+        onClose?.(server);
       });
 
       startSending(transport);

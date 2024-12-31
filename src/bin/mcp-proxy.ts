@@ -8,7 +8,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { proxyServer, startSSEServer } from "../MCPProxy.js";
 import { EventSource } from "eventsource";
 
-if (!('EventSource' in global)) {
+if (!("EventSource" in global)) {
   // @ts-expect-error - figure out how to use --experimental-eventsource with vitest
   global.EventSource = EventSource;
 }
@@ -71,18 +71,20 @@ const serverVersion = client.getServerVersion() as {
 
 const serverCapabilities = client.getServerCapabilities() as {};
 
-const server = new Server(serverVersion, {
-  capabilities: serverCapabilities,
-});
-
-proxyServer({
-  server,
-  client,
-  serverCapabilities,
-});
-
 await startSSEServer({
-  server,
+  createServer: async () => {
+    const server = new Server(serverVersion, {
+      capabilities: serverCapabilities,
+    });
+
+    proxyServer({
+      server,
+      client,
+      serverCapabilities,
+    });
+
+    return server;
+  },
   port: argv.port,
   endpoint: argv.endpoint as `/${string}`,
 });
