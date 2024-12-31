@@ -209,7 +209,11 @@ export type SSEServer = {
   close: () => Promise<void>;
 };
 
-export const startSSEServer = async ({
+type ServerLike = {
+  connect: Server['connect'];
+};
+
+export const startSSEServer = async <T extends ServerLike>({
   port,
   createServer,
   endpoint,
@@ -218,9 +222,9 @@ export const startSSEServer = async ({
 }: {
   port: number;
   endpoint: string;
-  createServer: (transport: SSEServerTransport) => Promise<Server>;
-  onConnect?: (server: Server) => void;
-  onClose?: (server: Server) => void;
+  createServer: () => Promise<T>;
+  onConnect?: (server: T) => void;
+  onClose?: (server: T) => void;
 }): Promise<SSEServer> => {
   const activeTransports: Record<string, SSEServerTransport> = {};
 
@@ -237,7 +241,7 @@ export const startSSEServer = async ({
     if (req.method === "GET" && req.url === endpoint) {
       const transport = new SSEServerTransport("/messages", res);
 
-      const server = await createServer(transport);
+      const server = await createServer();
 
       activeTransports[transport.sessionId] = transport;
 
