@@ -249,8 +249,6 @@ export const startSSEServer = async ({
 
       await server.connect(transport);
 
-      onConnect?.(server);
-
       res.on("close", () => {
         console.log("SSE connection closed");
 
@@ -259,7 +257,9 @@ export const startSSEServer = async ({
         onClose?.(server);
       });
 
-      startSending(transport);
+      startSending(transport).then(() => {
+        onConnect?.(server);
+      });
 
       return;
     }
