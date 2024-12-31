@@ -12,7 +12,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { proxyServer, startSSEServer } from "../MCPProxy.js";
 
-
 const argv = await yargs(hideBin(process.argv))
   .scriptName("mcp-proxy")
   .command("$0 <command> [args...]", "Run a command with MCP arguments")

@@ -219,10 +219,14 @@ export const startSSEServer = async ({
   port,
   server,
   endpoint,
+  onConnect,
+  onClose,
 }: {
   port: number;
   endpoint: string;
   server: Server;
+  onConnect?: (transport: SSEServerTransport) => void;
+  onClose?: (transport: SSEServerTransport) => void;
 }): Promise<SSEServer> => {
   const activeTransports: Record<string, SSEServerTransport> = {};
 
@@ -243,10 +247,14 @@ export const startSSEServer = async ({
 
       await server.connect(transport);
 
+      onConnect?.(transport);
+
       res.on("close", () => {
         console.log("SSE connection closed");
 
         delete activeTransports[transport.sessionId];
+
+        onClose?.(transport);
       });
 
       startSending(transport);
@@ -291,7 +299,21 @@ export const startSSEServer = async ({
 
   return {
     close: async () => {
-      httpServer.close();
+      for (const transport of Object.values(activeTransports)) {
+        await transport.close();
+      }
+
+      return new Promise((resolve, reject) => {
+        httpServer.close((error) => {
+          if (error) {
+            reject(error);
+
+            return;
+          }
+
+          resolve();
+        });
+      });
     },
   };
 };
