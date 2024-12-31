@@ -170,12 +170,6 @@ export const proxyServer = async ({
  */
 const startSending = async (transport: SSEServerTransport) => {
   try {
-    await transport.send({
-      jsonrpc: "2.0",
-      method: "sse/connection",
-      params: { message: "SSE Connection established" },
-    });
-
     let messageCount = 0;
     const interval = setInterval(async () => {
       messageCount++;
@@ -249,6 +243,14 @@ export const startSSEServer = async ({
 
       await server.connect(transport);
 
+      await transport.send({
+        jsonrpc: "2.0",
+        method: "sse/connection",
+        params: { message: "SSE Connection established" },
+      });
+
+      onConnect?.(server);
+
       res.on("close", () => {
         console.log("SSE connection closed");
 
@@ -257,9 +259,7 @@ export const startSSEServer = async ({
         onClose?.(server);
       });
 
-      startSending(transport).then(() => {
-        onConnect?.(server);
-      });
+      startSending(transport);
 
       return;
     }
