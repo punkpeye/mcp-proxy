@@ -3,6 +3,9 @@
 A TypeScript SSE proxy for [MCP](https://modelcontextprotocol.io/) servers that use `stdio` transport.
 
 > [!NOTE]
+> CORS is enabled by default.
+
+> [!NOTE]
 > For a Python implementation, see [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy).
 
 > [!NOTE]

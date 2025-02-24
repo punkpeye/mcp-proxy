@@ -193,6 +193,25 @@ export const startSSEServer = async <T extends ServerLike>({
    * @author https://dev.classmethod.jp/articles/mcp-sse/
    */
   const httpServer = http.createServer(async (req, res) => {
+    if (req.headers.origin) {
+      try {
+        const origin = new URL(req.headers.origin);
+
+        res.setHeader("Access-Control-Allow-Origin", origin.origin);
+        res.setHeader("Access-Control-Allow-Credentials", "true");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "*");
+      } catch (error) {
+        console.error("Error parsing origin:", error);
+      }
+    }
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     if (req.method === "GET" && req.url === `/ping`) {
       res.writeHead(200).end("pong");
 
