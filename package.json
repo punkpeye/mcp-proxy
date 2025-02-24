@@ -22,9 +22,9 @@
   "module": "dist/MCPProxy.js",
   "types": "dist/MCPProxy.d.ts",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
-    "eventsource": "^3.0.2",
-    "fastmcp": "^1.5.9",
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "eventsource": "^3.0.5",
+    "fastmcp": "^1.18.0",
     "yargs": "^17.7.2"
   },
   "repository": {
@@ -42,19 +42,19 @@
     ]
   },
   "devDependencies": {
-    "@sebbo2002/semantic-release-jsr": "^2.0.2",
+    "@sebbo2002/semantic-release-jsr": "^2.0.4",
     "@tsconfig/node22": "^22.0.0",
-    "@types/node": "^22.10.2",
+    "@types/node": "^22.13.5",
     "@types/yargs": "^17.0.33",
-    "eslint": "^9.17.0",
-    "eslint-plugin-perfectionist": "^4.4.0",
+    "eslint": "^9.21.0",
+    "eslint-plugin-perfectionist": "^4.9.0",
     "get-port-please": "^3.1.2",
-    "prettier": "^3.4.2",
-    "semantic-release": "^24.2.0",
-    "tsup": "^8.3.5",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "prettier": "^3.5.2",
+    "semantic-release": "^24.2.3",
+    "tsup": "^8.3.6",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.6"
   },
   "tsup": {
     "entry": [
