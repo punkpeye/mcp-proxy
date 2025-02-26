@@ -221,7 +221,21 @@ export const startSSEServer = async <T extends ServerLike>({
     if (req.method === "GET" && req.url === endpoint) {
       const transport = new SSEServerTransport("/messages", res);
 
-      const server = await createServer(req);
+      let server: T;
+
+      try {
+        server = await createServer(req);
+      } catch (error) {
+        if (error instanceof Response) {
+          res.writeHead(error.status).end(error.statusText);
+
+          return;
+        }
+
+        res.writeHead(500).end("Error creating server");
+
+        return;
+      }
 
       activeTransports[transport.sessionId] = transport;
 
