@@ -183,7 +183,7 @@ export const startSSEServer = async <T extends ServerLike>({
 }: {
   port: number;
   endpoint: string;
-  createServer: () => Promise<T>;
+  createServer: (request: http.IncomingMessage) => Promise<T>;
   onConnect?: (server: T) => void;
   onClose?: (server: T) => void;
 }): Promise<SSEServer> => {
@@ -221,7 +221,7 @@ export const startSSEServer = async <T extends ServerLike>({
     if (req.method === "GET" && req.url === endpoint) {
       const transport = new SSEServerTransport("/messages", res);
 
-      const server = await createServer();
+      const server = await createServer(req);
 
       activeTransports[transport.sessionId] = transport;
 
