@@ -279,7 +279,11 @@ export const startSSEServer = async <T extends ServerLike>({
     res.writeHead(404).end();
   });
 
-  httpServer.listen(port, "::");
+  await new Promise((resolve) => {
+    httpServer.listen(port, "::", () => {
+      resolve(undefined);
+    });
+  });
 
   return {
     close: async () => {
