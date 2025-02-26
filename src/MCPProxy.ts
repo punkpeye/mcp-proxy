@@ -225,17 +225,11 @@ export const startSSEServer = async <T extends ServerLike>({
 
       activeTransports[transport.sessionId] = transport;
 
-      await server.connect(transport);
-
-      await transport.send({
-        jsonrpc: "2.0",
-        method: "sse/connection",
-        params: { message: "SSE Connection established" },
-      });
-
-      onConnect?.(server);
+      let closed = false;
 
       res.on("close", async () => {
+        closed = true;
+
         try {
           await server.close();
         } catch (error) {
@@ -246,6 +240,24 @@ export const startSSEServer = async <T extends ServerLike>({
 
         onClose?.(server);
       });
+
+      try {
+        await server.connect(transport);
+
+        await transport.send({
+          jsonrpc: "2.0",
+          method: "sse/connection",
+          params: { message: "SSE Connection established" },
+        });
+
+        onConnect?.(server);
+      } catch (error) {
+        if (!closed) {
+          console.error("Error connecting to server:", error);
+          
+          res.writeHead(500).end("Error connecting to server");
+        }
+      }
 
       return;
     }
