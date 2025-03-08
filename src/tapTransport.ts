@@ -24,8 +24,6 @@ type TransportEvent =
       type: "start";
     };
 
-
-
 export const tapTransport = (
   transport: Transport,
   eventHandler: (event: TransportEvent) => void,

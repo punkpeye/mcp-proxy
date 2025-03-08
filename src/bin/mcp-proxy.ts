@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { EventSource } from "eventsource";
 import { setTimeout } from "node:timers/promises";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport } from "../StdioClientTransport.js";
 import util from "node:util";
 import { startSSEServer } from "../startSSEServer.js";
 import { proxyServer } from "../proxyServer.js";
@@ -57,13 +57,12 @@ const connect = async (client: Client) => {
     args: argv.args,
     env: process.env as Record<string, string>,
     stderr: "pipe",
+    onEvent: (event) => {
+      console.debug("transport event", event);
+    },
   });
 
-  console.info("connecting to the MCP server...");
-
   await client.connect(transport);
-
-  console.info("connected to the MCP server");
 };
 
 const proxy = async () => {
