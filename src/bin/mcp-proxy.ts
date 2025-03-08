@@ -58,7 +58,9 @@ const connect = async (client: Client) => {
     env: process.env as Record<string, string>,
     stderr: "pipe",
     onEvent: (event) => {
-      console.debug("transport event", event);
+      if (argv.debug) {
+        console.debug("transport event", event);
+      }
     },
   });
 
