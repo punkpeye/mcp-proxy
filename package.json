@@ -25,7 +25,6 @@
     "@modelcontextprotocol/sdk": "^1.6.0",
     "eventsource": "^3.0.5",
     "fastmcp": "^1.18.0",
-    "multiline-ts": "^4.0.1",
     "yargs": "^17.7.2"
   },
   "repository": {

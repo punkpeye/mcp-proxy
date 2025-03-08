@@ -8,7 +8,6 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { proxyServer, startSSEServer } from "../MCPProxy.js";
 import { EventSource } from "eventsource";
 import { setTimeout } from "node:timers/promises";
-import multiline from 'multiline-ts';
 
 if (!("EventSource" in global)) {
   // @ts-expect-error - figure out how to use --experimental-eventsource with vitest
@@ -81,14 +80,14 @@ try {
 
   console.info('connected to the MCP server');
 } catch (error) {
-  console.error(multiline`
-    could not connect to the MCP server
+  console.error(`
+could not connect to the MCP server
 
-    --- error ---
-    ${String(error)}
+--- error ---
+${String(error)}
 
-    --- stderr output ---
-    ${stderrOutput}
+--- stderr output ---
+${stderrOutput}
 `);
 
   await setTimeout(1000);
