@@ -2,12 +2,12 @@
 
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { proxyServer, startSSEServer } from "../MCPProxy.js";
 import { EventSource } from "eventsource";
 import { setTimeout } from "node:timers/promises";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import util from "node:util";
 
 util.inspect.defaultOptions.depth = 8;
@@ -50,85 +50,72 @@ const argv = await yargs(hideBin(process.argv))
   .help()
   .parseAsync();
 
-const transport = new StdioClientTransport({
-  command: argv.command,
-  args: argv.args,
-  env: process.env as Record<string, string>,
-  stderr: 'pipe',
-});
-
-const client = new Client(
-  {
-    name: "mcp-proxy",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {},
-  },
-);
-
-
-let stderrOutput = '';
-
-try {
-  console.info('connecting to the MCP server...');
-
-  const connectionPromise = client.connect(transport);
-
-  transport?.stderr?.on('data', (chunk) => {
-    stderrOutput += chunk.toString();
+const connect = async (client: Client) => {
+  const transport = new StdioClientTransport({
+    command: argv.command,
+    args: argv.args,
+    env: process.env as Record<string, string>,
+    stderr: "pipe",
   });
 
-  await connectionPromise;
+  console.info("connecting to the MCP server...");
 
-  console.info('connected to the MCP server');
-} catch (error) {
-  console.error(`
-could not connect to the MCP server
+  await client.connect(transport);
 
---- error ---
-${String(error)}
-
---- stderr output ---
-${stderrOutput}
-`);
-
-  await setTimeout(1000);
-
-  process.exit(1);
-}
-
-const serverVersion = client.getServerVersion() as {
-  name: string;
-  version: string;
+  console.info("connected to the MCP server");
 };
 
-const serverCapabilities = client.getServerCapabilities() as {};
+const proxy = async () => {
+  const client = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
 
-try {
-  console.info('starting the SSE server on port %d', argv.port);
+  await connect(client);
+
+  const serverVersion = client.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+
+  const serverCapabilities = client.getServerCapabilities() as {};
+
+  console.info("starting the SSE server on port %d", argv.port);
 
   await startSSEServer({
     createServer: async () => {
       const server = new Server(serverVersion, {
         capabilities: serverCapabilities,
       });
-  
+
       proxyServer({
         server,
         client,
         serverCapabilities,
       });
-  
+
       return server;
     },
     port: argv.port,
     endpoint: argv.endpoint as `/${string}`,
   });
-} catch (error) {
-  console.error('could not start the SSE server', error);
+};
 
-  await setTimeout(1000);
+const main = async () => {
+  try {
+    await proxy();
+  } catch (error) {
+    console.error("could not start the proxy", error);
 
-  process.exit(1);
-}
+    await setTimeout(1000);
+
+    process.exit(1);
+  }
+};
+
+await main();
