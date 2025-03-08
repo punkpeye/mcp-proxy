@@ -4,11 +4,12 @@ import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { proxyServer, startSSEServer } from "../MCPProxy.js";
 import { EventSource } from "eventsource";
 import { setTimeout } from "node:timers/promises";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import util from "node:util";
+import { startSSEServer } from "../startSSEServer.js";
+import { proxyServer } from "../proxyServer.js";
 
 util.inspect.defaultOptions.depth = 8;
 

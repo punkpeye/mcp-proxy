@@ -2,11 +2,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { it, expect, vi } from "vitest";
-import { proxyServer, startSSEServer } from "./MCPProxy.js";
+import { startSSEServer } from "./startSSEServer.js";
 import { getRandomPort } from "get-port-please";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { EventSource } from "eventsource";
 import { setTimeout as delay } from "node:timers/promises";
+import { proxyServer } from "./proxyServer.js";
 
 if (!("EventSource" in global)) {
   // @ts-expect-error - figure out how to use --experimental-eventsource with vitest

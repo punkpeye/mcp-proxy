@@ -19,8 +19,8 @@
   "author": "Frank Fiegel <frank@glama.ai>",
   "license": "MIT",
   "description": "A TypeScript SSE proxy for MCP servers that use stdio transport.",
-  "module": "dist/MCPProxy.js",
-  "types": "dist/MCPProxy.d.ts",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.0",
     "eventsource": "^3.0.5",
