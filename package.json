@@ -58,7 +58,7 @@
   },
   "tsup": {
     "entry": [
-      "src/MCPProxy.ts",
+      "src/index.ts",
       "src/bin/mcp-proxy.ts"
     ],
     "format": [
