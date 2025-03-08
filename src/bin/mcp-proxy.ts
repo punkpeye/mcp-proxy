@@ -8,6 +8,9 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { proxyServer, startSSEServer } from "../MCPProxy.js";
 import { EventSource } from "eventsource";
 import { setTimeout } from "node:timers/promises";
+import util from "node:util";
+
+util.inspect.defaultOptions.depth = 8;
 
 if (!("EventSource" in global)) {
   // @ts-expect-error - figure out how to use --experimental-eventsource with vitest
