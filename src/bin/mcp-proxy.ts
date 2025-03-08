@@ -7,6 +7,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { proxyServer, startSSEServer } from "../MCPProxy.js";
 import { EventSource } from "eventsource";
+import { setTimeout } from "node:timers/promises";
+import { prefixLines } from "../utilities/prefixLines.js";
 
 if (!("EventSource" in global)) {
   // @ts-expect-error - figure out how to use --experimental-eventsource with vitest
@@ -50,6 +52,7 @@ const transport = new StdioClientTransport({
   command: argv.command,
   args: argv.args,
   env: process.env as Record<string, string>,
+  stderr: 'pipe',
 });
 
 const client = new Client(
@@ -62,7 +65,28 @@ const client = new Client(
   },
 );
 
-await client.connect(transport);
+
+let stderrOutput = '';
+
+try {
+  console.info('connecting to the MCP server...');
+
+  const connectionPromise = client.connect(transport);
+
+  transport?.stderr?.on('data', (chunk) => {
+    stderrOutput += chunk.toString();
+  });
+
+  await connectionPromise;
+
+  console.info('connected to the MCP server');
+} catch (error) {
+  console.error('could not connect to the MCP server', error, prefixLines(stderrOutput, '> '));
+
+  await setTimeout(1000);
+
+  process.exit(1);
+}
 
 const serverVersion = client.getServerVersion() as {
   name: string;
@@ -71,20 +95,30 @@ const serverVersion = client.getServerVersion() as {
 
 const serverCapabilities = client.getServerCapabilities() as {};
 
-await startSSEServer({
-  createServer: async () => {
-    const server = new Server(serverVersion, {
-      capabilities: serverCapabilities,
-    });
+try {
+  console.info('starting the SSE server on port %d', argv.port);
 
-    proxyServer({
-      server,
-      client,
-      serverCapabilities,
-    });
+  await startSSEServer({
+    createServer: async () => {
+      const server = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+  
+      proxyServer({
+        server,
+        client,
+        serverCapabilities,
+      });
+  
+      return server;
+    },
+    port: argv.port,
+    endpoint: argv.endpoint as `/${string}`,
+  });
+} catch (error) {
+  console.error('could not start the SSE server', error);
 
-    return server;
-  },
-  port: argv.port,
-  endpoint: argv.endpoint as `/${string}`,
-});
+  await setTimeout(1000);
+
+  process.exit(1);
+}
