@@ -31,6 +31,7 @@ const argv = await yargs(hideBin(process.argv))
     array: true,
     describe: "The arguments to pass to the command",
   })
+  .env('MCP_PROXY')
   .options({
     debug: {
       type: "boolean",
