@@ -24,7 +24,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.0",
     "eventsource": "^3.0.5",
-    "fastmcp": "^1.18.0",
+    "fastmcp": "^1.20.2",
     "yargs": "^17.7.2"
   },
   "repository": {
