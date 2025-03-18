@@ -17,7 +17,7 @@ export const startSSEServer = async <T extends ServerLike>({
   endpoint,
   onConnect,
   onClose,
-  onUnhandledRequest
+  onUnhandledRequest,
 }: {
   port: number;
   endpoint: string;
@@ -26,7 +26,7 @@ export const startSSEServer = async <T extends ServerLike>({
   onClose?: (server: T) => void;
   onUnhandledRequest?: (
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ) => Promise<void>;
 }): Promise<SSEServer> => {
   const activeTransports: Record<string, SSEServerTransport> = {};
