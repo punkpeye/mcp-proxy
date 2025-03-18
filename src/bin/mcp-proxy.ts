@@ -5,7 +5,7 @@ import { hideBin } from "yargs/helpers";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { EventSource } from "eventsource";
-import { setTimeout } from "node:timers/promises";
+import { setTimeout } from "node:timers";
 import { StdioClientTransport } from "../StdioClientTransport.js";
 import util from "node:util";
 import { startSSEServer } from "../startSSEServer.js";
@@ -31,7 +31,7 @@ const argv = await yargs(hideBin(process.argv))
     array: true,
     describe: "The arguments to pass to the command",
   })
-  .env('MCP_PROXY')
+  .env("MCP_PROXY")
   .options({
     debug: {
       type: "boolean",
@@ -110,14 +110,22 @@ const proxy = async () => {
 };
 
 const main = async () => {
+  process.on("SIGINT", () => {
+    console.info("SIGINT received, shutting down");
+
+    setTimeout(() => {
+      process.exit(0);
+    }, 1000);
+  });
+
   try {
     await proxy();
   } catch (error) {
     console.error("could not start the proxy", error);
 
-    await setTimeout(1000);
-
-    process.exit(1);
+    setTimeout(() => {
+      process.exit(1);
+    }, 1000);
   }
 };
 
