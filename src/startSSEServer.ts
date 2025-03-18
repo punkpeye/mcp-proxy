@@ -17,12 +17,17 @@ export const startSSEServer = async <T extends ServerLike>({
   endpoint,
   onConnect,
   onClose,
+  onUnhandledRequest
 }: {
   port: number;
   endpoint: string;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   onConnect?: (server: T) => void;
   onClose?: (server: T) => void;
+  onUnhandledRequest?: (
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ) => Promise<void>;
 }): Promise<SSEServer> => {
   const activeTransports: Record<string, SSEServerTransport> = {};
 
@@ -139,7 +144,11 @@ export const startSSEServer = async <T extends ServerLike>({
       return;
     }
 
-    res.writeHead(404).end();
+    if (onUnhandledRequest) {
+      await onUnhandledRequest(req, res);
+    } else {
+      res.writeHead(404).end();
+    }
   });
 
   await new Promise((resolve) => {
