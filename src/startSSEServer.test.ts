@@ -101,6 +101,16 @@ it("proxies messages between SSE and stdio servers", async () => {
   });
   expect(await sseClient.subscribeResource({ uri: "xyz" })).toEqual({});
   expect(await sseClient.unsubscribeResource({ uri: "xyz" })).toEqual({});
+  expect(await sseClient.listResourceTemplates()).toEqual({
+    resourceTemplates: [
+      {
+        uriTemplate: `file://{filename}`,
+        name: "Example resource template",
+        description: "Specify the filename to retrieve",
+      },
+    ],
+  });
+
 
   expect(onConnect).toHaveBeenCalled();
   expect(onClose).not.toHaveBeenCalled();

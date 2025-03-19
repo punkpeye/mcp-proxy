@@ -1,6 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
+  ListResourceTemplatesRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
   SubscribeRequestSchema,
@@ -44,6 +45,18 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   } else {
     throw new Error("Resource not found");
   }
+});
+
+server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+  return {
+    resourceTemplates: [
+      {
+        uriTemplate: `file://{filename}`,
+        name: "Example resource template",
+        description: "Specify the filename to retrieve",
+      },
+    ],
+  };
 });
 
 server.setRequestHandler(SubscribeRequestSchema, async () => {
