@@ -9,6 +9,8 @@ import {
   ListToolsRequestSchema,
   LoggingMessageNotificationSchema,
   ReadResourceRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
   ServerCapabilities,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -56,6 +58,16 @@ export const proxyServer = async ({
     server.setRequestHandler(ReadResourceRequestSchema, async (args) => {
       return client.readResource(args.params);
     });
+
+    if (serverCapabilities?.resources.subscribe) {
+      server.setRequestHandler(SubscribeRequestSchema, async (args) => {
+        return client.subscribeResource(args.params);
+      });
+
+      server.setRequestHandler(UnsubscribeRequestSchema, async (args) => {
+        return client.unsubscribeResource(args.params);
+      });
+    }
   }
 
   if (serverCapabilities?.tools) {

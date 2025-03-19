@@ -3,6 +3,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
 const server = new Server(
@@ -12,7 +14,7 @@ const server = new Server(
   },
   {
     capabilities: {
-      resources: {},
+      resources: { subscribe: true },
     },
   },
 );
@@ -42,6 +44,14 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   } else {
     throw new Error("Resource not found");
   }
+});
+
+server.setRequestHandler(SubscribeRequestSchema, async () => {
+  return {};
+});
+
+server.setRequestHandler(UnsubscribeRequestSchema, async () => {
+  return {};
 });
 
 const transport = new StdioServerTransport();
