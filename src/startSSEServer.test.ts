@@ -50,7 +50,7 @@ it("proxies messages between SSE and stdio servers", async () => {
         capabilities: serverCapabilities,
       });
 
-      proxyServer({
+      await proxyServer({
         server: mcpServer,
         client: stdioClient,
         serverCapabilities,
@@ -80,7 +80,8 @@ it("proxies messages between SSE and stdio servers", async () => {
 
   await sseClient.connect(transport);
 
-  expect(await sseClient.listResources()).toEqual({
+  const result = await sseClient.listResources();
+  expect(result).toEqual({
     resources: [
       {
         uri: "file:///example.txt",
@@ -88,6 +89,28 @@ it("proxies messages between SSE and stdio servers", async () => {
       },
     ],
   });
+
+  expect(await sseClient.readResource({uri: (result.resources[0].uri)},{})).toEqual({
+    contents: [
+      {
+        uri: "file:///example.txt",
+        mimeType: "text/plain",
+        text: "This is the content of the example resource.",
+      },
+    ],
+  });
+  expect(await sseClient.subscribeResource({ uri: "xyz" })).toEqual({});
+  expect(await sseClient.unsubscribeResource({ uri: "xyz" })).toEqual({});
+  expect(await sseClient.listResourceTemplates()).toEqual({
+    resourceTemplates: [
+      {
+        uriTemplate: `file://{filename}`,
+        name: "Example resource template",
+        description: "Specify the filename to retrieve",
+      },
+    ],
+  });
+
 
   expect(onConnect).toHaveBeenCalled();
   expect(onClose).not.toHaveBeenCalled();
