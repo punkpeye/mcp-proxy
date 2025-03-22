@@ -11,6 +11,7 @@ import {
   ReadResourceRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
+  ResourceUpdatedNotificationSchema,
   ServerCapabilities,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -60,6 +61,13 @@ export const proxyServer = async ({
     });
 
     if (serverCapabilities?.resources.subscribe) {
+      server.setNotificationHandler(
+          ResourceUpdatedNotificationSchema,
+          async (args) => {
+            return client.notification(args);
+          },
+      );
+
       server.setRequestHandler(SubscribeRequestSchema, async (args) => {
         return client.subscribeResource(args.params);
       });
