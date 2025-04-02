@@ -60,7 +60,7 @@ export const startSSEServer = async <T extends ServerLike>({
       return;
     }
 
-    if (req.method === "GET" && req.url === endpoint) {
+    if (req.method === "GET" && new URL(req.url!, "http://localhost").pathname === endpoint) {
       const transport = new SSEServerTransport("/messages", res);
 
       let server: T;
