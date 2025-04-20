@@ -22,8 +22,8 @@
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.6.0",
-    "eventsource": "^3.0.5",
+    "@modelcontextprotocol/sdk": "^1.10.1",
+    "eventsource": "^3.0.6",
     "yargs": "^17.7.2"
   },
   "repository": {
@@ -42,19 +42,19 @@
     ]
   },
   "devDependencies": {
-    "@sebbo2002/semantic-release-jsr": "^2.0.4",
-    "@tsconfig/node22": "^22.0.0",
-    "@types/node": "^22.13.5",
+    "@sebbo2002/semantic-release-jsr": "^2.0.5",
+    "@tsconfig/node22": "^22.0.1",
+    "@types/node": "^22.14.1",
     "@types/yargs": "^17.0.33",
-    "eslint": "^9.21.0",
-    "eslint-plugin-perfectionist": "^4.9.0",
+    "eslint": "^9.25.0",
+    "eslint-plugin-perfectionist": "^4.11.0",
     "get-port-please": "^3.1.2",
-    "prettier": "^3.5.2",
+    "prettier": "^3.5.3",
     "semantic-release": "^24.2.3",
-    "tsup": "^8.3.6",
+    "tsup": "^8.4.0",
     "tsx": "^4.19.3",
-    "typescript": "^5.7.3",
-    "vitest": "^3.0.6"
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.1"
   },
   "tsup": {
     "entry": [
