@@ -25,7 +25,14 @@ npm install mcp-proxy
 npx mcp-proxy --port 8080 --endpoint /sse tsx server.js
 ```
 
-This starts an SSE server and `stdio` server (`tsx server.js`). The SSE server listens on port 8080 and endpoint `/sse`, and forwards messages to the `stdio` server.
+This starts a server and `stdio` server (`tsx server.js`). The server listens on port 8080 and endpoint `/sse` by default, and forwards messages to the `stdio` server.
+
+options:
+
+- `--port`: Specify the port to listen on (default: 8080)
+- `--endpoint`: Specify the endpoint to listen on (default: `/sse` for SSE server, `/stream` for stream server)
+- `--server`: Specify the server type to use (default: `sse`)
+- `--debug`: Enable debug logging
 
 ### Node.js SDK
 
