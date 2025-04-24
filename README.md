@@ -71,6 +71,26 @@ const { close } = await startSSEServer({
 close();
 ```
 
+#### `startHTTPStreamServer`
+
+Starts a proxy that listens on a `port` and `endpoint`, and sends messages to the attached server via `StreamableHTTPServerTransport`.
+
+```ts
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { startHTTPStreamServer } from "mcp-proxy";
+
+const { close } = await startHTTPStreamServer({
+  port: 8080,
+  endpoint: "/stream",
+  createServer: async () => {
+    return new Server();
+  },
+  eventStore: new InMemoryEventStore(), // optional you can provide your own event store
+});
+
+close();
+```
+
 #### `tapTransport`
 
 Taps into a transport and logs events.
