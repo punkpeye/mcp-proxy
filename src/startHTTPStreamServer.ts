@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import http from "http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { InMemoryEventStore } from "./inMemoryEventStore.js";
+import { InMemoryEventStore } from "./InMemoryEventStore.js";
 
 export type SSEServer = {
   close: () => Promise<void>;

@@ -1,7 +1,10 @@
+/**
+ * This is a copy of the InMemoryEventStore from the typescript-sdk
+ * https://github.com/modelcontextprotocol/typescript-sdk/blob/main/src/inMemoryEventStore.ts
+ */
+
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-
-// copied from https://github.com/modelcontextprotocol/typescript-sdk
 
 /**
  * Simple in-memory implementation of the EventStore interface for resumability

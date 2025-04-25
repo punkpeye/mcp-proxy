@@ -11,7 +11,7 @@ import util from "node:util";
 import { startSSEServer } from "../startSSEServer.js";
 import { startHTTPStreamServer } from "../startHTTPStreamServer.js";
 import { proxyServer } from "../proxyServer.js";
-import { InMemoryEventStore } from "../inMemoryEventStore.js";
+import { InMemoryEventStore } from "../InMemoryEventStore.js";
 
 util.inspect.defaultOptions.depth = 8;
 

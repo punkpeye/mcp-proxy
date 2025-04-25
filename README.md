@@ -84,7 +84,7 @@ Starts a proxy that listens on a `port` and `endpoint`, and sends messages to th
 
 ```ts
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { startHTTPStreamServer } from "mcp-proxy";
+import { startHTTPStreamServer, InMemoryEventStore } from "mcp-proxy";
 
 const { close } = await startHTTPStreamServer({
   port: 8080,
