@@ -1,3 +1,10 @@
 import perfectionist from "eslint-plugin-perfectionist";
 
-export default [perfectionist.configs["recommended-alphabetical"]];
+export default [
+  perfectionist.configs["recommended-alphabetical"],
+  {
+    ignores: [
+      '**/dist/'
+    ],
+  },
+];

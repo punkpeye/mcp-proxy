@@ -9,7 +9,9 @@ import { setTimeout } from "node:timers";
 import { StdioClientTransport } from "../StdioClientTransport.js";
 import util from "node:util";
 import { startSSEServer } from "../startSSEServer.js";
+import { startHTTPStreamServer } from "../startHTTPStreamServer.js";
 import { proxyServer } from "../proxyServer.js";
+import { InMemoryEventStore } from "../InMemoryEventStore.js";
 
 util.inspect.defaultOptions.depth = 8;
 
@@ -40,13 +42,18 @@ const argv = await yargs(hideBin(process.argv))
     },
     endpoint: {
       type: "string",
-      describe: "The endpoint to listen on for SSE",
-      default: "/sse",
+      describe: "The endpoint to listen on",
     },
     port: {
       type: "number",
-      describe: "The port to listen on for SSE",
+      describe: "The port to listen on",
       default: 8080,
+    },
+    server: {
+      type: "string",
+      describe: "The server type to use (sse or stream)",
+      choices: ["sse", "stream"],
+      default: "sse",
     },
   })
   .help()
@@ -76,7 +83,7 @@ const proxy = async () => {
     },
     {
       capabilities: {},
-    },
+    }
   );
 
   await connect(client);
@@ -88,25 +95,36 @@ const proxy = async () => {
 
   const serverCapabilities = client.getServerCapabilities() as {};
 
-  console.info("starting the SSE server on port %d", argv.port);
+  console.info("starting the %s server on port %d", argv.server, argv.port);
 
-  await startSSEServer({
-    createServer: async () => {
-      const server = new Server(serverVersion, {
-        capabilities: serverCapabilities,
-      });
+  const createServer = async () => {
+    const server = new Server(serverVersion, {
+      capabilities: serverCapabilities,
+    });
 
-      proxyServer({
-        server,
-        client,
-        serverCapabilities,
-      });
+    proxyServer({
+      server,
+      client,
+      serverCapabilities,
+    });
 
-      return server;
-    },
-    port: argv.port,
-    endpoint: argv.endpoint as `/${string}`,
-  });
+    return server;
+  };
+
+  if (argv.server === "sse") {
+    await startSSEServer({
+      createServer,
+      port: argv.port,
+      endpoint: argv.endpoint || ("/sse" as `/${string}`),
+    });
+  } else {
+    await startHTTPStreamServer({
+      createServer,
+      port: argv.port,
+      endpoint: argv.endpoint || ("/stream" as `/${string}`),
+      eventStore: new InMemoryEventStore(),
+    });
+  }
 };
 
 const main = async () => {
