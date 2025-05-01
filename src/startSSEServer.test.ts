@@ -93,7 +93,9 @@ it("proxies messages between SSE and stdio servers", async () => {
     ],
   });
 
-  expect(await sseClient.readResource({uri: (result.resources[0].uri)},{})).toEqual({
+  expect(
+    await sseClient.readResource({ uri: result.resources[0].uri }, {}),
+  ).toEqual({
     contents: [
       {
         mimeType: "text/plain",
@@ -113,7 +115,6 @@ it("proxies messages between SSE and stdio servers", async () => {
       },
     ],
   });
-
 
   expect(onConnect).toHaveBeenCalled();
   expect(onClose).not.toHaveBeenCalled();

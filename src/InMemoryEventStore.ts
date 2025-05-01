@@ -12,7 +12,7 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
  * where a persistent storage solution would be more appropriate.
  */
 export class InMemoryEventStore implements EventStore {
-  private events: Map<string, { message: JSONRPCMessage; streamId: string; }> =
+  private events: Map<string, { message: JSONRPCMessage; streamId: string }> =
     new Map();
 
   /**
@@ -23,7 +23,7 @@ export class InMemoryEventStore implements EventStore {
     lastEventId: string,
     {
       send,
-    }: { send: (eventId: string, message: JSONRPCMessage) => Promise<void> }
+    }: { send: (eventId: string, message: JSONRPCMessage) => Promise<void> },
   ): Promise<string> {
     if (!lastEventId || !this.events.has(lastEventId)) {
       return "";
@@ -39,7 +39,7 @@ export class InMemoryEventStore implements EventStore {
 
     // Sort events by eventId for chronological ordering
     const sortedEvents = [...this.events.entries()].sort((a, b) =>
-      a[0].localeCompare(b[0])
+      a[0].localeCompare(b[0]),
     );
 
     for (const [

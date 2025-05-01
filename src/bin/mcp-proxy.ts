@@ -84,7 +84,7 @@ const proxy = async () => {
     },
     {
       capabilities: {},
-    }
+    },
   );
 
   await connect(client);

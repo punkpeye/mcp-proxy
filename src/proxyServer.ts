@@ -62,10 +62,10 @@ export const proxyServer = async ({
 
     if (serverCapabilities?.resources.subscribe) {
       server.setNotificationHandler(
-          ResourceUpdatedNotificationSchema,
-          async (args) => {
-            return client.notification(args);
-          },
+        ResourceUpdatedNotificationSchema,
+        async (args) => {
+          return client.notification(args);
+        },
       );
 
       server.setRequestHandler(SubscribeRequestSchema, async (args) => {

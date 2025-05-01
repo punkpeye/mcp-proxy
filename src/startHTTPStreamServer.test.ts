@@ -28,7 +28,7 @@ it("proxies messages between HTTP stream and stdio servers", async () => {
     },
     {
       capabilities: {},
-    }
+    },
   );
 
   await stdioClient.connect(stdioTransport);
@@ -74,11 +74,11 @@ it("proxies messages between HTTP stream and stdio servers", async () => {
     },
     {
       capabilities: {},
-    }
+    },
   );
 
   const transport = new StreamableHTTPClientTransport(
-    new URL(`http://localhost:${port}/stream`)
+    new URL(`http://localhost:${port}/stream`),
   );
 
   await streamClient.connect(transport);
@@ -94,7 +94,7 @@ it("proxies messages between HTTP stream and stdio servers", async () => {
   });
 
   expect(
-    await streamClient.readResource({ uri: result.resources[0].uri }, {})
+    await streamClient.readResource({ uri: result.resources[0].uri }, {}),
   ).toEqual({
     contents: [
       {

@@ -34,7 +34,7 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
   onConnect?: (server: T) => void;
   onUnhandledRequest?: (
     req: http.IncomingMessage,
-    res: http.ServerResponse
+    res: http.ServerResponse,
   ) => Promise<void>;
   port: number;
 }): Promise<SSEServer> => {
@@ -146,7 +146,7 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
               },
               id: null,
               jsonrpc: "2.0",
-            })
+            }),
           );
 
           return;
@@ -162,7 +162,7 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
             error: { code: -32603, message: "Internal Server Error" },
             id: null,
             jsonrpc: "2.0",
-          })
+          }),
         );
       }
       return;
