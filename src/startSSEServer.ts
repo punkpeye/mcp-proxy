@@ -58,7 +58,7 @@ export const startSSEServer = async <T extends ServerLike>({
       res.writeHead(200, { "Content-Type": "text/plain" }).end("OK");
       return;
     }
-    
+
     if (req.method === "GET" && req.url === `/ping`) {
       res.writeHead(200).end("pong");
 
