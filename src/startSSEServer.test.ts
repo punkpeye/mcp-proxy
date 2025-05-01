@@ -1,13 +1,14 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { it, expect, vi } from "vitest";
-import { startSSEServer } from "./startSSEServer.js";
-import { getRandomPort } from "get-port-please";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { EventSource } from "eventsource";
+import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "node:timers/promises";
+import { expect, it, vi } from "vitest";
+
 import { proxyServer } from "./proxyServer.js";
+import { startSSEServer } from "./startSSEServer.js";
 
 if (!("EventSource" in global)) {
   // @ts-expect-error - figure out how to use --experimental-eventsource with vitest
@@ -16,8 +17,8 @@ if (!("EventSource" in global)) {
 
 it("proxies messages between SSE and stdio servers", async () => {
   const stdioTransport = new StdioClientTransport({
-    command: "tsx",
     args: ["src/simple-stdio-server.ts"],
+    command: "tsx",
   });
 
   const stdioClient = new Client(
@@ -37,7 +38,9 @@ it("proxies messages between SSE and stdio servers", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {};
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
 
   const port = await getRandomPort();
 
@@ -51,17 +54,17 @@ it("proxies messages between SSE and stdio servers", async () => {
       });
 
       await proxyServer({
-        server: mcpServer,
         client: stdioClient,
+        server: mcpServer,
         serverCapabilities,
       });
 
       return mcpServer;
     },
-    port,
     endpoint: "/sse",
-    onConnect,
     onClose,
+    onConnect,
+    port,
   });
 
   const sseClient = new Client(
@@ -84,8 +87,8 @@ it("proxies messages between SSE and stdio servers", async () => {
   expect(result).toEqual({
     resources: [
       {
-        uri: "file:///example.txt",
         name: "Example Resource",
+        uri: "file:///example.txt",
       },
     ],
   });
@@ -93,9 +96,9 @@ it("proxies messages between SSE and stdio servers", async () => {
   expect(await sseClient.readResource({uri: (result.resources[0].uri)},{})).toEqual({
     contents: [
       {
-        uri: "file:///example.txt",
         mimeType: "text/plain",
         text: "This is the content of the example resource.",
+        uri: "file:///example.txt",
       },
     ],
   });
@@ -104,9 +107,9 @@ it("proxies messages between SSE and stdio servers", async () => {
   expect(await sseClient.listResourceTemplates()).toEqual({
     resourceTemplates: [
       {
-        uriTemplate: `file://{filename}`,
-        name: "Example resource template",
         description: "Specify the filename to retrieve",
+        name: "Example resource template",
+        uriTemplate: `file://{filename}`,
       },
     ],
   });

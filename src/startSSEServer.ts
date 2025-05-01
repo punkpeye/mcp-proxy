@@ -1,33 +1,33 @@
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import http from "http";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 export type SSEServer = {
   close: () => Promise<void>;
 };
 
 type ServerLike = {
-  connect: Server["connect"];
   close: Server["close"];
+  connect: Server["connect"];
 };
 
 export const startSSEServer = async <T extends ServerLike>({
-  port,
   createServer,
   endpoint,
-  onConnect,
   onClose,
+  onConnect,
   onUnhandledRequest,
+  port,
 }: {
-  port: number;
-  endpoint: string;
   createServer: (request: http.IncomingMessage) => Promise<T>;
-  onConnect?: (server: T) => void;
+  endpoint: string;
   onClose?: (server: T) => void;
+  onConnect?: (server: T) => void;
   onUnhandledRequest?: (
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ) => Promise<void>;
+  port: number;
 }): Promise<SSEServer> => {
   const activeTransports: Record<string, SSEServerTransport> = {};
 

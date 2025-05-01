@@ -1,3 +1,4 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -9,20 +10,19 @@ import {
   ListToolsRequestSchema,
   LoggingMessageNotificationSchema,
   ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
   ResourceUpdatedNotificationSchema,
   ServerCapabilities,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 export const proxyServer = async ({
-  server,
   client,
+  server,
   serverCapabilities,
 }: {
-  server: Server;
   client: Client;
+  server: Server;
   serverCapabilities: ServerCapabilities;
 }) => {
   if (serverCapabilities?.logging) {

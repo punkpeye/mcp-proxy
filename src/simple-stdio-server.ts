@@ -1,8 +1,8 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
-  ListResourceTemplatesRequestSchema,
   ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
   ReadResourceRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
@@ -24,8 +24,8 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return {
     resources: [
       {
-        uri: "file:///example.txt",
         name: "Example Resource",
+        uri: "file:///example.txt",
       },
     ],
   };
@@ -36,9 +36,9 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     return {
       contents: [
         {
-          uri: "file:///example.txt",
           mimeType: "text/plain",
           text: "This is the content of the example resource.",
+          uri: "file:///example.txt",
         },
       ],
     };
@@ -51,9 +51,9 @@ server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
   return {
     resourceTemplates: [
       {
-        uriTemplate: `file://{filename}`,
-        name: "Example resource template",
         description: "Specify the filename to retrieve",
+        name: "Example resource template",
+        uriTemplate: `file://{filename}`,
       },
     ],
   };

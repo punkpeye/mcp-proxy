@@ -3,22 +3,22 @@ import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 
 type TransportEvent =
   | {
+      error: Error;
+      type: "onerror";
+    }
+  | {
+      message: JSONRPCMessage;
+      type: "onmessage";
+    }
+  | {
+      message: JSONRPCMessage;
+      type: "send";
+    }
+  | {
       type: "close";
     }
   | {
       type: "onclose";
-    }
-  | {
-      type: "onerror";
-      error: Error;
-    }
-  | {
-      type: "onmessage";
-      message: JSONRPCMessage;
-    }
-  | {
-      type: "send";
-      message: JSONRPCMessage;
     }
   | {
       type: "start";
@@ -53,8 +53,8 @@ export const tapTransport = (
 
   transport.onerror = async (error: Error) => {
     eventHandler({
-      type: "onerror",
       error,
+      type: "onerror",
     });
 
     return originalOnError?.(error);
@@ -62,8 +62,8 @@ export const tapTransport = (
 
   transport.onmessage = async (message: JSONRPCMessage) => {
     eventHandler({
-      type: "onmessage",
       message,
+      type: "onmessage",
     });
 
     return originalOnMessage?.(message);
@@ -71,8 +71,8 @@ export const tapTransport = (
 
   transport.send = async (message: JSONRPCMessage) => {
     eventHandler({
-      type: "send",
       message,
+      type: "send",
     });
 
     return originalSend?.(message);

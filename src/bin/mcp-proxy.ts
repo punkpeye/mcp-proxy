@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 
-import yargs from "yargs";
-import { hideBin } from "yargs/helpers";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { EventSource } from "eventsource";
 import { setTimeout } from "node:timers";
-import { StdioClientTransport } from "../StdioClientTransport.js";
 import util from "node:util";
-import { startSSEServer } from "../startSSEServer.js";
-import { startHTTPStreamServer } from "../startHTTPStreamServer.js";
-import { proxyServer } from "../proxyServer.js";
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
+
 import { InMemoryEventStore } from "../InMemoryEventStore.js";
+import { proxyServer } from "../proxyServer.js";
+import { startHTTPStreamServer } from "../startHTTPStreamServer.js";
+import { startSSEServer } from "../startSSEServer.js";
+import { StdioClientTransport } from "../StdioClientTransport.js";
 
 util.inspect.defaultOptions.depth = 8;
 
@@ -24,36 +25,36 @@ const argv = await yargs(hideBin(process.argv))
   .scriptName("mcp-proxy")
   .command("$0 <command> [args...]", "Run a command with MCP arguments")
   .positional("command", {
-    type: "string",
-    describe: "The command to run",
     demandOption: true,
+    describe: "The command to run",
+    type: "string",
   })
   .positional("args", {
-    type: "string",
     array: true,
     describe: "The arguments to pass to the command",
+    type: "string",
   })
   .env("MCP_PROXY")
   .options({
     debug: {
-      type: "boolean",
-      describe: "Enable debug logging",
       default: false,
+      describe: "Enable debug logging",
+      type: "boolean",
     },
     endpoint: {
-      type: "string",
       describe: "The endpoint to listen on",
+      type: "string",
     },
     port: {
-      type: "number",
-      describe: "The port to listen on",
       default: 8080,
+      describe: "The port to listen on",
+      type: "number",
     },
     server: {
-      type: "string",
-      describe: "The server type to use (sse or stream)",
       choices: ["sse", "stream"],
       default: "sse",
+      describe: "The server type to use (sse or stream)",
+      type: "string",
     },
   })
   .help()
@@ -61,15 +62,15 @@ const argv = await yargs(hideBin(process.argv))
 
 const connect = async (client: Client) => {
   const transport = new StdioClientTransport({
-    command: argv.command,
     args: argv.args,
+    command: argv.command,
     env: process.env as Record<string, string>,
-    stderr: "pipe",
     onEvent: (event) => {
       if (argv.debug) {
         console.debug("transport event", event);
       }
     },
+    stderr: "pipe",
   });
 
   await client.connect(transport);
@@ -93,7 +94,9 @@ const proxy = async () => {
     version: string;
   };
 
-  const serverCapabilities = client.getServerCapabilities() as {};
+  const serverCapabilities = client.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
 
   console.info("starting the %s server on port %d", argv.server, argv.port);
 
@@ -103,8 +106,8 @@ const proxy = async () => {
     });
 
     proxyServer({
-      server,
       client,
+      server,
       serverCapabilities,
     });
 
@@ -114,15 +117,15 @@ const proxy = async () => {
   if (argv.server === "sse") {
     await startSSEServer({
       createServer,
-      port: argv.port,
       endpoint: argv.endpoint || ("/sse" as `/${string}`),
+      port: argv.port,
     });
   } else {
     await startHTTPStreamServer({
       createServer,
-      port: argv.port,
       endpoint: argv.endpoint || ("/stream" as `/${string}`),
       eventStore: new InMemoryEventStore(),
+      port: argv.port,
     });
   }
 };

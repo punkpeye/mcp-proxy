@@ -1,11 +1,12 @@
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   EventStore,
   StreamableHTTPServerTransport,
 } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { randomUUID } from "node:crypto";
-import http from "http";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import http from "http";
+import { randomUUID } from "node:crypto";
+
 import { InMemoryEventStore } from "./InMemoryEventStore.js";
 
 export type SSEServer = {
@@ -13,35 +14,35 @@ export type SSEServer = {
 };
 
 type ServerLike = {
-  connect: Server["connect"];
   close: Server["close"];
+  connect: Server["connect"];
 };
 
 export const startHTTPStreamServer = async <T extends ServerLike>({
-  port,
   createServer,
   endpoint,
   eventStore,
-  onConnect,
   onClose,
+  onConnect,
   onUnhandledRequest,
+  port,
 }: {
-  port: number;
-  endpoint: string;
   createServer: (request: http.IncomingMessage) => Promise<T>;
+  endpoint: string;
   eventStore?: EventStore;
-  onConnect?: (server: T) => void;
   onClose?: (server: T) => void;
+  onConnect?: (server: T) => void;
   onUnhandledRequest?: (
     req: http.IncomingMessage,
     res: http.ServerResponse
   ) => Promise<void>;
+  port: number;
 }): Promise<SSEServer> => {
   const activeTransports: Record<
     string,
     {
-      transport: StreamableHTTPServerTransport;
       server: T;
+      transport: StreamableHTTPServerTransport;
     }
   > = {};
 
@@ -92,15 +93,15 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
         } else if (!sessionId && isInitializeRequest(body)) {
           // Create a new transport for the session
           transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: randomUUID,
             eventStore: eventStore || new InMemoryEventStore(),
             onsessioninitialized: (_sessionId) => {
               // add only when the id Sesison id is generated
               activeTransports[_sessionId] = {
-                transport,
                 server,
+                transport,
               };
             },
+            sessionIdGenerator: randomUUID,
           });
 
           // Handle the server close event
@@ -139,12 +140,12 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
           res.setHeader("Content-Type", "application/json");
           res.writeHead(400).end(
             JSON.stringify({
-              jsonrpc: "2.0",
               error: {
                 code: -32000,
                 message: "Bad Request: No valid session ID provided",
               },
               id: null,
+              jsonrpc: "2.0",
             })
           );
 
@@ -158,9 +159,9 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
         res.setHeader("Content-Type", "application/json");
         res.writeHead(500).end(
           JSON.stringify({
-            jsonrpc: "2.0",
             error: { code: -32603, message: "Internal Server Error" },
             id: null,
+            jsonrpc: "2.0",
           })
         );
       }
@@ -174,8 +175,8 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
       const sessionId = req.headers["mcp-session-id"] as string | undefined;
       const activeTransport:
         | {
-            transport: StreamableHTTPServerTransport;
             server: T;
+            transport: StreamableHTTPServerTransport;
           }
         | undefined = sessionId ? activeTransports[sessionId] : undefined;
 
@@ -213,7 +214,7 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
 
       console.log("received delete request for session", sessionId);
 
-      const { transport, server } = activeTransports[sessionId];
+      const { server, transport } = activeTransports[sessionId];
       if (!transport) {
         res.writeHead(400).end("No active transport");
         return;

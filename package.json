@@ -42,18 +42,22 @@
     ]
   },
   "devDependencies": {
+    "@eslint/js": "^9.25.1",
     "@sebbo2002/semantic-release-jsr": "^2.0.5",
     "@tsconfig/node22": "^22.0.1",
     "@types/node": "^22.14.1",
     "@types/yargs": "^17.0.33",
     "eslint": "^9.25.0",
+    "eslint-config-prettier": "^10.1.2",
     "eslint-plugin-perfectionist": "^4.11.0",
     "get-port-please": "^3.1.2",
+    "jiti": "^2.4.2",
     "prettier": "^3.5.3",
     "semantic-release": "^24.2.3",
     "tsup": "^8.4.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
+    "typescript-eslint": "^8.31.1",
     "vitest": "^3.1.1"
   },
   "tsup": {
