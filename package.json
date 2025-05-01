@@ -4,7 +4,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsup",
-    "test": "vitest run && tsc",
+    "test": "vitest run && tsc && prettier --check . && eslint .",
     "format": "prettier --write . && eslint --fix ."
   },
   "bin": {
