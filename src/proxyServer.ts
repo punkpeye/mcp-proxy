@@ -32,6 +32,12 @@ export const proxyServer = async ({
         return client.notification(args);
       },
     );
+    client.setNotificationHandler(
+      LoggingMessageNotificationSchema,
+      async (args) => {
+        return server.notification(args);
+      },
+    )
   }
 
   if (serverCapabilities?.prompts) {
