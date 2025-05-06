@@ -105,8 +105,6 @@ Starts a proxy that listens on a `stdio`, and sends messages to the attached `ss
 ```ts
 import { ServerType, startStdioServer } from "./startStdioServer.js";
 
-console.warn(JSON.parse(process.argv[2]), 'process.env.simpleConfig');
-
 await startStdioServer({
   serverType: ServerType.SSE,
   url: "http://127.0.0.1:3000/sse",

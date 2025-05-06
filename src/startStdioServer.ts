@@ -36,7 +36,7 @@ export const startStdioServer = async ({
     default:
       transport = new StreamableHTTPClientTransport(
         new URL(url),
-        transportOptions
+        transportOptions,
       );
   }
   const streamClient = initStreamClient
@@ -48,7 +48,7 @@ export const startStdioServer = async ({
         },
         {
           capabilities: {},
-        }
+        },
       );
   await streamClient.connect(transport);
 
@@ -64,8 +64,8 @@ export const startStdioServer = async ({
   const stdioServer = initStdioServer
     ? await initStdioServer()
     : new Server(serverVersion, {
-      capabilities: serverCapabilities,
-    });
+        capabilities: serverCapabilities,
+      });
 
   const stdioTransport = new StdioServerTransport();
 

@@ -37,7 +37,7 @@ export const proxyServer = async ({
       async (args) => {
         return server.notification(args);
       },
-    )
+    );
   }
 
   if (serverCapabilities?.prompts) {

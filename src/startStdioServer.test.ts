@@ -1,6 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { CallToolResultSchema, LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolResultSchema,
+  LoggingMessageNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { EventSource } from "eventsource";
 import { ChildProcess, fork } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -17,7 +20,7 @@ describe("startStdioServer.test.ts", () => {
 
   beforeEach(async () => {
     const serverPath = require.resolve(
-      "@modelcontextprotocol/sdk/examples/server/sseAndStreamableHttpCompatibleServer.js"
+      "@modelcontextprotocol/sdk/examples/server/sseAndStreamableHttpCompatibleServer.js",
     );
     proc = fork(serverPath, [], {
       stdio: "pipe",
@@ -39,10 +42,13 @@ describe("startStdioServer.test.ts", () => {
 
   it("proxies messages between stdio and sse servers", async () => {
     const stdioTransport = new StdioClientTransport({
-      args: ["src/simple-stdio-proxy-server.ts", JSON.stringify({
-        serverType: ServerType.SSE,
-        url: "http://127.0.0.1:3000/sse",
-      })],
+      args: [
+        "src/simple-stdio-proxy-server.ts",
+        JSON.stringify({
+          serverType: ServerType.SSE,
+          url: "http://127.0.0.1:3000/sse",
+        }),
+      ],
       command: "tsx",
     });
 
@@ -53,7 +59,7 @@ describe("startStdioServer.test.ts", () => {
       },
       {
         capabilities: {},
-      }
+      },
     );
 
     let notificationCount = 0;
@@ -62,10 +68,10 @@ describe("startStdioServer.test.ts", () => {
       LoggingMessageNotificationSchema,
       (notification) => {
         console.log(
-          `Notification: ${notification.params.level} - ${notification.params.data}`
+          `Notification: ${notification.params.level} - ${notification.params.data}`,
         );
         notificationCount++;
-      }
+      },
     );
 
     await stdioClient.connect(stdioTransport);
@@ -99,24 +105,27 @@ describe("startStdioServer.test.ts", () => {
       ],
     });
     const request = {
-      method: 'tools/call',
+      method: "tools/call",
       params: {
         arguments: {
-          count: 2,       // Send 5 notifications
-          interval: 1000 // 1 second between notifications
+          count: 2, // Send 5 notifications
+          interval: 1000, // 1 second between notifications
         },
-        name: 'start-notification-stream'
-      }
+        name: "start-notification-stream",
+      },
     };
-    const notificationResult = await stdioClient.request(request, CallToolResultSchema);
+    const notificationResult = await stdioClient.request(
+      request,
+      CallToolResultSchema,
+    );
 
     expect(notificationResult).toEqual({
       content: [
         {
-          text: 'Started sending periodic notifications every 1000ms',
-          type: 'text'
-        }
-      ]
+          text: "Started sending periodic notifications every 1000ms",
+          type: "text",
+        },
+      ],
     });
 
     expect(notificationCount).toEqual(2);
@@ -126,10 +135,13 @@ describe("startStdioServer.test.ts", () => {
 
   it("proxies messages between stdio and stream able servers", async () => {
     const stdioTransport = new StdioClientTransport({
-      args: ["src/simple-stdio-proxy-server.ts", JSON.stringify({
-        serverType: ServerType.HTTPStream,
-        url: "http://127.0.0.1:3000/mcp",
-      })],
+      args: [
+        "src/simple-stdio-proxy-server.ts",
+        JSON.stringify({
+          serverType: ServerType.HTTPStream,
+          url: "http://127.0.0.1:3000/mcp",
+        }),
+      ],
       command: "tsx",
     });
 
@@ -140,7 +152,7 @@ describe("startStdioServer.test.ts", () => {
       },
       {
         capabilities: {},
-      }
+      },
     );
 
     let notificationCount = 0;
@@ -149,10 +161,10 @@ describe("startStdioServer.test.ts", () => {
       LoggingMessageNotificationSchema,
       (notification) => {
         console.log(
-          `Notification: ${notification.params.level} - ${notification.params.data}`
+          `Notification: ${notification.params.level} - ${notification.params.data}`,
         );
         notificationCount++;
-      }
+      },
     );
 
     await stdioClient.connect(stdioTransport);
@@ -186,24 +198,27 @@ describe("startStdioServer.test.ts", () => {
       ],
     });
     const request = {
-      method: 'tools/call',
+      method: "tools/call",
       params: {
         arguments: {
-          count: 2,       // Send 5 notifications
-          interval: 1000 // 1 second between notifications
+          count: 2, // Send 5 notifications
+          interval: 1000, // 1 second between notifications
         },
-        name: 'start-notification-stream'
-      }
+        name: "start-notification-stream",
+      },
     };
-    const notificationResult = await stdioClient.request(request, CallToolResultSchema);
+    const notificationResult = await stdioClient.request(
+      request,
+      CallToolResultSchema,
+    );
 
     expect(notificationResult).toEqual({
       content: [
         {
-          text: 'Started sending periodic notifications every 1000ms',
-          type: 'text'
-        }
-      ]
+          text: "Started sending periodic notifications every 1000ms",
+          type: "text",
+        },
+      ],
     });
 
     expect(notificationCount).toEqual(2);
