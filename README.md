@@ -98,6 +98,19 @@ const { close } = await startHTTPStreamServer({
 close();
 ```
 
+#### `startStdioServer`
+
+Starts a proxy that listens on a `stdio`, and sends messages to the attached `sse` or `streamable` server.
+
+```ts
+import { ServerType, startStdioServer } from "./startStdioServer.js";
+
+await startStdioServer({
+  serverType: ServerType.SSE,
+  url: "http://127.0.0.1:3000/sse",
+});
+```
+
 #### `tapTransport`
 
 Taps into a transport and logs events.
