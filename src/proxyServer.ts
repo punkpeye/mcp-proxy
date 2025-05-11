@@ -24,7 +24,7 @@ export const proxyServer = async ({
   client: Client;
   server: Server;
   serverCapabilities: ServerCapabilities;
-}) => {
+}): Promise<void> => {
   if (serverCapabilities?.logging) {
     server.setNotificationHandler(
       LoggingMessageNotificationSchema,

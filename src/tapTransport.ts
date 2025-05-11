@@ -27,7 +27,7 @@ type TransportEvent =
 export const tapTransport = (
   transport: Transport,
   eventHandler: (event: TransportEvent) => void,
-) => {
+): Transport => {
   const originalClose = transport.close.bind(transport);
   const originalOnClose = transport.onclose?.bind(transport);
   const originalOnError = transport.onerror?.bind(transport);
