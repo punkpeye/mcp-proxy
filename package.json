@@ -4,7 +4,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsup",
-    "test": "vitest run && tsc && prettier --check . && eslint .",
+    "test": "vitest run && tsc && prettier --check . && eslint . && jsr publish --dry-run",
     "format": "prettier --write . && eslint --fix ."
   },
   "bin": {
@@ -38,7 +38,8 @@
       "@semantic-release/commit-analyzer",
       "@semantic-release/release-notes-generator",
       "@semantic-release/npm",
-      "@semantic-release/github"
+      "@semantic-release/github",
+      "@sebbo2002/semantic-release-jsr"
     ]
   },
   "devDependencies": {
@@ -54,6 +55,7 @@
     "express": "^5.0.1",
     "get-port-please": "^3.1.2",
     "jiti": "^2.4.2",
+    "jsr": "^0.13.4",
     "prettier": "^3.5.3",
     "semantic-release": "^24.2.3",
     "tsup": "^8.4.0",
