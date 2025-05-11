@@ -1,6 +1,6 @@
 {
-  "exports": "./dist/index.js",
-  "include": ["dist/index.js", "dist/bin/mcp-proxy.js"],
+  "exports": "./src/index.js",
+  "include": ["src/index.js", "src/bin/mcp-proxy.js"],
   "license": "MIT",
   "name": "@punkpeye/mcp-proxy",
   "version": "1.0.0"
