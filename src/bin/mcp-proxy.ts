@@ -10,8 +10,7 @@ import { hideBin } from "yargs/helpers";
 
 import { InMemoryEventStore } from "../InMemoryEventStore.js";
 import { proxyServer } from "../proxyServer.js";
-import { startHTTPStreamServer } from "../startHTTPStreamServer.js";
-import { startSSEServer } from "../startSSEServer.js";
+import { startHTTPServer } from "../startHTTPServer.js";
 import { StdioClientTransport } from "../StdioClientTransport.js";
 
 util.inspect.defaultOptions.depth = 8;
@@ -98,7 +97,7 @@ const proxy = async () => {
     capabilities: Record<string, unknown>;
   };
 
-  console.info("starting the %s server on port %d", argv.server, argv.port);
+  console.info("starting server on port %d", argv.port);
 
   const createServer = async () => {
     const server = new Server(serverVersion, {
@@ -114,20 +113,11 @@ const proxy = async () => {
     return server;
   };
 
-  if (argv.server === "sse") {
-    await startSSEServer({
-      createServer,
-      endpoint: argv.endpoint || ("/sse" as `/${string}`),
-      port: argv.port,
-    });
-  } else {
-    await startHTTPStreamServer({
-      createServer,
-      endpoint: argv.endpoint || ("/stream" as `/${string}`),
-      eventStore: new InMemoryEventStore(),
-      port: argv.port,
-    });
-  }
+  await startHTTPServer({
+    createServer,
+    eventStore: new InMemoryEventStore(),
+    port: argv.port,
+  });
 };
 
 const main = async () => {

@@ -1,4 +1,5 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import {
   EventStore,
   StreamableHTTPServerTransport,
@@ -17,6 +18,21 @@ type ServerLike = {
   close: Server["close"];
   connect: Server["connect"];
 };
+
+const getBody = (request: http.IncomingMessage) => {
+  return new Promise((resolve) => {
+    const bodyParts: Buffer[] = [];
+    let body: string;
+    request
+      .on("data", (chunk) => {
+        bodyParts.push(chunk);
+      })
+      .on("end", () => {
+        body = Buffer.concat(bodyParts).toString();
+        resolve(JSON.parse(body));
+      });
+  });
+}
 
 const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
@@ -201,9 +217,114 @@ const handleStreamRequest = async <T extends ServerLike>({
   return false;
 };
 
-export const startHTTPStreamServer = async <T extends ServerLike>({
+const handleSSERequest = async <T extends ServerLike>({
+  activeTransports,
   createServer,
   endpoint,
+  onClose,
+  onConnect,
+  req,
+  res,
+}: {
+  activeTransports: Record<string, SSEServerTransport>;
+  createServer: (request: http.IncomingMessage) => Promise<T>;
+  endpoint: string;
+  onClose?: (server: T) => void;
+  onConnect?: (server: T) => void;
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+}) => {
+  if (
+    req.method === "GET" &&
+    new URL(req.url!, "http://localhost").pathname === endpoint
+  ) {
+    const transport = new SSEServerTransport("/messages", res);
+
+    let server: T;
+
+    try {
+      server = await createServer(req);
+    } catch (error) {
+      if (error instanceof Response) {
+        res.writeHead(error.status).end(error.statusText);
+
+        return;
+      }
+
+      res.writeHead(500).end("Error creating server");
+
+      return true;
+    }
+
+    activeTransports[transport.sessionId] = transport;
+
+    let closed = false;
+
+    res.on("close", async () => {
+      closed = true;
+
+      try {
+        await server.close();
+      } catch (error) {
+        console.error("Error closing server:", error);
+      }
+
+      delete activeTransports[transport.sessionId];
+
+      onClose?.(server);
+    });
+
+    try {
+      await server.connect(transport);
+
+      await transport.send({
+        jsonrpc: "2.0",
+        method: "sse/connection",
+        params: { message: "SSE Connection established" },
+      });
+
+      onConnect?.(server);
+    } catch (error) {
+      if (!closed) {
+        console.error("Error connecting to server:", error);
+
+        res.writeHead(500).end("Error connecting to server");
+      }
+    }
+
+    return true;
+  }
+
+  if (req.method === "POST" && req.url?.startsWith("/messages")) {
+    const sessionId = new URL(req.url, "https://example.com").searchParams.get(
+      "sessionId",
+    );
+
+    if (!sessionId) {
+      res.writeHead(400).end("No sessionId");
+
+      return true;
+    }
+
+    const activeTransport: SSEServerTransport | undefined =
+      activeTransports[sessionId];
+
+    if (!activeTransport) {
+      res.writeHead(400).end("No active transport");
+
+      return;
+    }
+
+    await activeTransport.handlePostMessage(req, res);
+
+    return true;
+  }
+
+  return false;
+};
+
+export const startHTTPServer = async <T extends ServerLike>({
+  createServer,
   eventStore,
   onClose,
   onConnect,
@@ -211,7 +332,6 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
   port,
 }: {
   createServer: (request: http.IncomingMessage) => Promise<T>;
-  endpoint: string;
   eventStore?: EventStore;
   onClose?: (server: T) => void;
   onConnect?: (server: T) => void;
@@ -221,14 +341,16 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
   ) => Promise<void>;
   port: number;
 }): Promise<SSEServer> => {
-  const activeTransports: Record<
+  const activeSSETransports: Record<string, SSEServerTransport> = {};
+
+  const activeStreamTransports: Record<
     string,
     {
       server: T;
       transport: StreamableHTTPServerTransport;
     }
   > = {};
-
+  
   /**
    * @author https://dev.classmethod.jp/articles/mcp-sse/
    */
@@ -256,19 +378,29 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
       res.writeHead(200).end("pong");
       return;
     }
-
-    const handled = await handleStreamRequest({
-      activeTransports,
+    
+    if (await handleSSERequest({
+      activeTransports: activeSSETransports,
       createServer,
-      endpoint,
+      endpoint: "/sse",
+      onClose,
+      onConnect,
+      req,
+      res,
+    })) {
+      return;
+    }
+
+    if (await handleStreamRequest({
+      activeTransports: activeStreamTransports,
+      createServer,
+      endpoint: "/stream",
       eventStore,
       onClose,
       onConnect,
       req,
       res,
-    });
-
-    if (handled) {
+    })) {
       return;
     }
 
@@ -287,7 +419,11 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
 
   return {
     close: async () => {
-      for (const transport of Object.values(activeTransports)) {
+      for (const transport of Object.values(activeSSETransports)) {
+        await transport.close();
+      }
+
+      for (const transport of Object.values(activeStreamTransports)) {
         await transport.transport.close();
       }
 
@@ -306,17 +442,3 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
   };
 };
 
-function getBody(request: http.IncomingMessage) {
-  return new Promise((resolve) => {
-    const bodyParts: Buffer[] = [];
-    let body: string;
-    request
-      .on("data", (chunk) => {
-        bodyParts.push(chunk);
-      })
-      .on("end", () => {
-        body = Buffer.concat(bodyParts).toString();
-        resolve(JSON.parse(body));
-      });
-  });
-}

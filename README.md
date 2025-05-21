@@ -1,6 +1,6 @@
 # MCP Proxy
 
-A TypeScript SSE proxy for [MCP](https://modelcontextprotocol.io/) servers that use `stdio` transport.
+A TypeScript streamable HTTP and SSE proxy for [MCP](https://modelcontextprotocol.io/) servers that use `stdio` transport.
 
 > [!NOTE]
 > CORS is enabled by default.
@@ -25,13 +25,11 @@ npm install mcp-proxy
 npx mcp-proxy --port 8080 --endpoint /sse tsx server.js
 ```
 
-This starts a server and `stdio` server (`tsx server.js`). The server listens on port 8080 and endpoint `/sse` by default, and forwards messages to the `stdio` server.
+This starts a server and `stdio` server (`tsx server.js`). The server listens on port 8080 and `/stream` (streamable HTTP) and `/sse` (SSE) endpoints, and forwards messages to the `stdio` server.
 
 options:
 
 - `--port`: Specify the port to listen on (default: 8080)
-- `--endpoint`: Specify the endpoint to listen on (default: `/sse` for SSE server, `/stream` for stream server)
-- `--server`: Specify the server type to use (default: `sse`)
 - `--debug`: Enable debug logging
 
 ### Node.js SDK
@@ -59,40 +57,20 @@ proxyServer({
 
 In this example, the server will proxy all requests to the client and vice versa.
 
-#### `startSSEServer`
+#### `startHTTPServer`
 
-Starts a proxy that listens on a `port` and `endpoint`, and sends messages to the attached server via `SSEServerTransport`.
-
-```ts
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { startSSEServer } from "mcp-proxy";
-
-const { close } = await startSSEServer({
-  port: 8080,
-  endpoint: "/sse",
-  createServer: async () => {
-    return new Server();
-  },
-});
-
-close();
-```
-
-#### `startHTTPStreamServer`
-
-Starts a proxy that listens on a `port` and `endpoint`, and sends messages to the attached server via `StreamableHTTPServerTransport`.
+Starts a proxy that listens on a `port`, and sends messages to the attached server via `StreamableHTTPServerTransport` and `SSEServerTransport`.
 
 ```ts
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { startHTTPStreamServer, InMemoryEventStore } from "mcp-proxy";
+import { startHTTPServer } from "mcp-proxy";
 
-const { close } = await startHTTPStreamServer({
-  port: 8080,
-  endpoint: "/stream",
+const { close } = await startHTTPServer({
   createServer: async () => {
     return new Server();
   },
-  eventStore: new InMemoryEventStore(), // optional you can provide your own event store
+  eventStore: new InMemoryEventStore(),
+  port: 8080,
 });
 
 close();
