@@ -269,7 +269,7 @@ const handleSSERequest = async <T extends ServerLike>({
       if (error instanceof Response) {
         res.writeHead(error.status).end(error.statusText);
 
-        return;
+        return true;
       }
 
       res.writeHead(500).end("Error creating server");
