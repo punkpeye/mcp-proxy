@@ -4,8 +4,8 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsup",
-    "test": "vitest run && tsc && prettier --check . && eslint . && jsr publish --dry-run --allow-dirty",
-    "format": "prettier --write . && eslint --fix ."
+    "test": "vitest run && tsc && eslint . && jsr publish --dry-run --allow-dirty",
+    "format": "eslint --fix ."
   },
   "bin": {
     "mcp-proxy": "dist/bin/mcp-proxy.js"
