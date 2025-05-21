@@ -312,7 +312,7 @@ const handleSSERequest = async <T extends ServerLike>({
     if (!activeTransport) {
       res.writeHead(400).end("No active transport");
 
-      return;
+      return true;
     }
 
     await activeTransport.handlePostMessage(req, res);
