@@ -22,8 +22,8 @@
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.10.1",
-    "eventsource": "^3.0.6",
+    "@modelcontextprotocol/sdk": "^1.11.4",
+    "eventsource": "^4.0.0",
     "yargs": "^17.7.2"
   },
   "repository": {
@@ -43,26 +43,26 @@
     ]
   },
   "devDependencies": {
-    "@eslint/js": "^9.25.1",
-    "@sebbo2002/semantic-release-jsr": "^2.0.5",
-    "@tsconfig/node22": "^22.0.1",
-    "@types/express": "^5.0.0",
-    "@types/node": "^22.14.1",
+    "@eslint/js": "^9.27.0",
+    "@sebbo2002/semantic-release-jsr": "^3.0.0",
+    "@tsconfig/node22": "^22.0.2",
+    "@types/express": "^5.0.2",
+    "@types/node": "^22.15.21",
     "@types/yargs": "^17.0.33",
-    "eslint": "^9.25.0",
-    "eslint-config-prettier": "^10.1.2",
-    "eslint-plugin-perfectionist": "^4.11.0",
+    "eslint": "^9.27.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-perfectionist": "^4.13.0",
     "express": "^5.0.1",
     "get-port-please": "^3.1.2",
     "jiti": "^2.4.2",
     "jsr": "^0.13.4",
     "prettier": "^3.5.3",
-    "semantic-release": "^24.2.3",
-    "tsup": "^8.4.0",
+    "semantic-release": "^24.2.4",
+    "tsup": "^8.5.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.31.1",
-    "vitest": "^3.1.1"
+    "typescript-eslint": "^8.32.1",
+    "vitest": "^3.1.4"
   },
   "tsup": {
     "entry": [
