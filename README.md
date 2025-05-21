@@ -22,7 +22,7 @@ npm install mcp-proxy
 ### Command-line
 
 ```bash
-npx mcp-proxy --port 8080 --endpoint /sse tsx server.js
+npx mcp-proxy --port 8080 tsx server.js
 ```
 
 This starts a server and `stdio` server (`tsx server.js`). The server listens on port 8080 and `/stream` (streamable HTTP) and `/sse` (SSE) endpoints, and forwards messages to the `stdio` server.
@@ -85,7 +85,7 @@ import { ServerType, startStdioServer } from "./startStdioServer.js";
 
 await startStdioServer({
   serverType: ServerType.SSE,
-  url: "http://127.0.0.1:3000/sse",
+  url: "http://127.0.0.1:8080/sse",
 });
 ```
 
