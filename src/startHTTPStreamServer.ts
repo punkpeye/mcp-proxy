@@ -18,6 +18,189 @@ type ServerLike = {
   connect: Server["connect"];
 };
 
+const handleStreamRequest = async <T extends ServerLike>({
+  activeTransports,
+  createServer,
+  endpoint,
+  eventStore,
+  onClose,
+  onConnect,
+  req,
+  res,
+}: {
+  activeTransports: Record<
+    string,
+    { server: T; transport: StreamableHTTPServerTransport }
+  >;
+  createServer: (request: http.IncomingMessage) => Promise<T>;
+  endpoint: string;
+  eventStore?: EventStore;
+  onClose?: (server: T) => void;
+  onConnect?: (server: T) => void;
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+}) => {
+  if (
+    req.method === "POST" &&
+    new URL(req.url!, "http://localhost").pathname === endpoint
+  ) {
+    try {
+      const sessionId = Array.isArray(req.headers["mcp-session-id"])
+        ? req.headers["mcp-session-id"][0]
+        : req.headers["mcp-session-id"];
+      let transport: StreamableHTTPServerTransport;
+      let server: T;
+
+      const body = await getBody(req);
+
+      if (sessionId && activeTransports[sessionId]) {
+        transport = activeTransports[sessionId].transport;
+        server = activeTransports[sessionId].server;
+      } else if (!sessionId && isInitializeRequest(body)) {
+        // Create a new transport for the session
+        transport = new StreamableHTTPServerTransport({
+          eventStore: eventStore || new InMemoryEventStore(),
+          onsessioninitialized: (_sessionId) => {
+            // add only when the id Sesison id is generated
+            activeTransports[_sessionId] = {
+              server,
+              transport,
+            };
+          },
+          sessionIdGenerator: randomUUID,
+        });
+
+        // Handle the server close event
+        transport.onclose = async () => {
+          const sid = transport.sessionId;
+          if (sid && activeTransports[sid]) {
+            onClose?.(server);
+            try {
+              await server.close();
+            } catch (error) {
+              console.error("Error closing server:", error);
+            }
+            delete activeTransports[sid];
+          }
+        };
+
+        // Create the server
+        try {
+          server = await createServer(req);
+        } catch (error) {
+          if (error instanceof Response) {
+            res.writeHead(error.status).end(error.statusText);
+            return true;
+          }
+          res.writeHead(500).end("Error creating server");
+          return true;
+        }
+
+        server.connect(transport);
+        onConnect?.(server);
+
+        await transport.handleRequest(req, res, body);
+        return true;
+      } else {
+        // Error if the server is not created but the request is not an initialize request
+        res.setHeader("Content-Type", "application/json");
+
+        res.writeHead(400).end(
+          JSON.stringify({
+            error: {
+              code: -32000,
+              message: "Bad Request: No valid session ID provided",
+            },
+            id: null,
+            jsonrpc: "2.0",
+          }),
+        );
+
+        return true;
+      }
+
+      // Handle ther request if the server is already created
+      await transport.handleRequest(req, res, body);
+    } catch (error) {
+      console.error("Error handling request:", error);
+      res.setHeader("Content-Type", "application/json");
+      res.writeHead(500).end(
+        JSON.stringify({
+          error: { code: -32603, message: "Internal Server Error" },
+          id: null,
+          jsonrpc: "2.0",
+        }),
+      );
+    }
+    return true;
+  }
+
+  if (
+    req.method === "GET" &&
+    new URL(req.url!, "http://localhost").pathname === endpoint
+  ) {
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    const activeTransport:
+      | {
+          server: T;
+          transport: StreamableHTTPServerTransport;
+        }
+      | undefined = sessionId ? activeTransports[sessionId] : undefined;
+
+    if (!sessionId) {
+      res.writeHead(400).end("No sessionId");
+      return true;
+    }
+
+    if (!activeTransport) {
+      res.writeHead(400).end("No active transport");
+      return true;
+    }
+
+    const lastEventId = req.headers["last-event-id"] as string | undefined;
+    if (lastEventId) {
+      console.log(`Client reconnecting with Last-Event-ID: ${lastEventId}`);
+    } else {
+      console.log(`Establishing new SSE stream for session ${sessionId}`);
+    }
+
+    await activeTransport.transport.handleRequest(req, res);
+    return true;
+  }
+
+  if (
+    req.method === "DELETE" &&
+    new URL(req.url!, "http://localhost").pathname === endpoint
+  ) {
+    console.log("received delete request");
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+    if (!sessionId) {
+      res.writeHead(400).end("Invalid or missing sessionId");
+      return true;
+    }
+
+    console.log("received delete request for session", sessionId);
+
+    const { server, transport } = activeTransports[sessionId];
+    if (!transport) {
+      res.writeHead(400).end("No active transport");
+      return true;
+    }
+
+    try {
+      await transport.handleRequest(req, res);
+      onClose?.(server);
+    } catch (error) {
+      console.error("Error handling delete request:", error);
+      res.writeHead(500).end("Error handling delete request");
+    }
+
+    return true;
+  }
+
+  return false;
+};
+
 export const startHTTPStreamServer = async <T extends ServerLike>({
   createServer,
   endpoint,
@@ -74,160 +257,18 @@ export const startHTTPStreamServer = async <T extends ServerLike>({
       return;
     }
 
-    if (
-      req.method === "POST" &&
-      new URL(req.url!, "http://localhost").pathname === endpoint
-    ) {
-      try {
-        const sessionId = Array.isArray(req.headers["mcp-session-id"])
-          ? req.headers["mcp-session-id"][0]
-          : req.headers["mcp-session-id"];
-        let transport: StreamableHTTPServerTransport;
-        let server: T;
+    const handled = await handleStreamRequest({
+      activeTransports,
+      createServer,
+      endpoint,
+      eventStore,
+      onClose,
+      onConnect,
+      req,
+      res,
+    });
 
-        const body = await getBody(req);
-
-        if (sessionId && activeTransports[sessionId]) {
-          transport = activeTransports[sessionId].transport;
-          server = activeTransports[sessionId].server;
-        } else if (!sessionId && isInitializeRequest(body)) {
-          // Create a new transport for the session
-          transport = new StreamableHTTPServerTransport({
-            eventStore: eventStore || new InMemoryEventStore(),
-            onsessioninitialized: (_sessionId) => {
-              // add only when the id Sesison id is generated
-              activeTransports[_sessionId] = {
-                server,
-                transport,
-              };
-            },
-            sessionIdGenerator: randomUUID,
-          });
-
-          // Handle the server close event
-          transport.onclose = async () => {
-            const sid = transport.sessionId;
-            if (sid && activeTransports[sid]) {
-              onClose?.(server);
-              try {
-                await server.close();
-              } catch (error) {
-                console.error("Error closing server:", error);
-              }
-              delete activeTransports[sid];
-            }
-          };
-
-          // Create the server
-          try {
-            server = await createServer(req);
-          } catch (error) {
-            if (error instanceof Response) {
-              res.writeHead(error.status).end(error.statusText);
-              return;
-            }
-            res.writeHead(500).end("Error creating server");
-            return;
-          }
-
-          server.connect(transport);
-          onConnect?.(server);
-
-          await transport.handleRequest(req, res, body);
-          return;
-        } else {
-          // Error if the server is not created but the request is not an initialize request
-          res.setHeader("Content-Type", "application/json");
-          res.writeHead(400).end(
-            JSON.stringify({
-              error: {
-                code: -32000,
-                message: "Bad Request: No valid session ID provided",
-              },
-              id: null,
-              jsonrpc: "2.0",
-            }),
-          );
-
-          return;
-        }
-
-        // Handle ther request if the server is already created
-        await transport.handleRequest(req, res, body);
-      } catch (error) {
-        console.error("Error handling request:", error);
-        res.setHeader("Content-Type", "application/json");
-        res.writeHead(500).end(
-          JSON.stringify({
-            error: { code: -32603, message: "Internal Server Error" },
-            id: null,
-            jsonrpc: "2.0",
-          }),
-        );
-      }
-      return;
-    }
-
-    if (
-      req.method === "GET" &&
-      new URL(req.url!, "http://localhost").pathname === endpoint
-    ) {
-      const sessionId = req.headers["mcp-session-id"] as string | undefined;
-      const activeTransport:
-        | {
-            server: T;
-            transport: StreamableHTTPServerTransport;
-          }
-        | undefined = sessionId ? activeTransports[sessionId] : undefined;
-
-      if (!sessionId) {
-        res.writeHead(400).end("No sessionId");
-        return;
-      }
-
-      if (!activeTransport) {
-        res.writeHead(400).end("No active transport");
-        return;
-      }
-
-      const lastEventId = req.headers["last-event-id"] as string | undefined;
-      if (lastEventId) {
-        console.log(`Client reconnecting with Last-Event-ID: ${lastEventId}`);
-      } else {
-        console.log(`Establishing new SSE stream for session ${sessionId}`);
-      }
-
-      await activeTransport.transport.handleRequest(req, res);
-      return;
-    }
-
-    if (
-      req.method === "DELETE" &&
-      new URL(req.url!, "http://localhost").pathname === endpoint
-    ) {
-      console.log("received delete request");
-      const sessionId = req.headers["mcp-session-id"] as string | undefined;
-      if (!sessionId) {
-        res.writeHead(400).end("Invalid or missing sessionId");
-        return;
-      }
-
-      console.log("received delete request for session", sessionId);
-
-      const { server, transport } = activeTransports[sessionId];
-      if (!transport) {
-        res.writeHead(400).end("No active transport");
-        return;
-      }
-
-      try {
-        await transport.handleRequest(req, res);
-        onClose?.(server);
-      } catch (error) {
-        console.error("Error handling delete request:", error);
-        res.writeHead(500).end("Error handling delete request");
-      }
-
+    if (handled) {
       return;
     }
 

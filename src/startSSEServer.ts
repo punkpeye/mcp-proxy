@@ -11,6 +11,112 @@ type ServerLike = {
   connect: Server["connect"];
 };
 
+const handleSSERequest = async <T extends ServerLike>({
+  activeTransports,
+  createServer,
+  endpoint,
+  onClose,
+  onConnect,
+  req,
+  res,
+}: {
+  activeTransports: Record<string, SSEServerTransport>;
+  createServer: (request: http.IncomingMessage) => Promise<T>;
+  endpoint: string;
+  onClose?: (server: T) => void;
+  onConnect?: (server: T) => void;
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+}) => {
+  if (
+    req.method === "GET" &&
+    new URL(req.url!, "http://localhost").pathname === endpoint
+  ) {
+    const transport = new SSEServerTransport("/messages", res);
+
+    let server: T;
+
+    try {
+      server = await createServer(req);
+    } catch (error) {
+      if (error instanceof Response) {
+        res.writeHead(error.status).end(error.statusText);
+
+        return;
+      }
+
+      res.writeHead(500).end("Error creating server");
+
+      return true;
+    }
+
+    activeTransports[transport.sessionId] = transport;
+
+    let closed = false;
+
+    res.on("close", async () => {
+      closed = true;
+
+      try {
+        await server.close();
+      } catch (error) {
+        console.error("Error closing server:", error);
+      }
+
+      delete activeTransports[transport.sessionId];
+
+      onClose?.(server);
+    });
+
+    try {
+      await server.connect(transport);
+
+      await transport.send({
+        jsonrpc: "2.0",
+        method: "sse/connection",
+        params: { message: "SSE Connection established" },
+      });
+
+      onConnect?.(server);
+    } catch (error) {
+      if (!closed) {
+        console.error("Error connecting to server:", error);
+
+        res.writeHead(500).end("Error connecting to server");
+      }
+    }
+
+    return true;
+  }
+
+  if (req.method === "POST" && req.url?.startsWith("/messages")) {
+    const sessionId = new URL(req.url, "https://example.com").searchParams.get(
+      "sessionId",
+    );
+
+    if (!sessionId) {
+      res.writeHead(400).end("No sessionId");
+
+      return true;
+    }
+
+    const activeTransport: SSEServerTransport | undefined =
+      activeTransports[sessionId];
+
+    if (!activeTransport) {
+      res.writeHead(400).end("No active transport");
+
+      return;
+    }
+
+    await activeTransport.handlePostMessage(req, res);
+
+    return true;
+  }
+
+  return false;
+};
+
 export const startSSEServer = async <T extends ServerLike>({
   createServer,
   endpoint,
@@ -65,90 +171,17 @@ export const startSSEServer = async <T extends ServerLike>({
       return;
     }
 
-    if (
-      req.method === "GET" &&
-      new URL(req.url!, "http://localhost").pathname === endpoint
-    ) {
-      const transport = new SSEServerTransport("/messages", res);
+    const handled = await handleSSERequest({
+      activeTransports,
+      createServer,
+      endpoint,
+      onClose,
+      onConnect,
+      req,
+      res,
+    });
 
-      let server: T;
-
-      try {
-        server = await createServer(req);
-      } catch (error) {
-        if (error instanceof Response) {
-          res.writeHead(error.status).end(error.statusText);
-
-          return;
-        }
-
-        res.writeHead(500).end("Error creating server");
-
-        return;
-      }
-
-      activeTransports[transport.sessionId] = transport;
-
-      let closed = false;
-
-      res.on("close", async () => {
-        closed = true;
-
-        try {
-          await server.close();
-        } catch (error) {
-          console.error("Error closing server:", error);
-        }
-
-        delete activeTransports[transport.sessionId];
-
-        onClose?.(server);
-      });
-
-      try {
-        await server.connect(transport);
-
-        await transport.send({
-          jsonrpc: "2.0",
-          method: "sse/connection",
-          params: { message: "SSE Connection established" },
-        });
-
-        onConnect?.(server);
-      } catch (error) {
-        if (!closed) {
-          console.error("Error connecting to server:", error);
-
-          res.writeHead(500).end("Error connecting to server");
-        }
-      }
-
-      return;
-    }
-
-    if (req.method === "POST" && req.url?.startsWith("/messages")) {
-      const sessionId = new URL(
-        req.url,
-        "https://example.com",
-      ).searchParams.get("sessionId");
-
-      if (!sessionId) {
-        res.writeHead(400).end("No sessionId");
-
-        return;
-      }
-
-      const activeTransport: SSEServerTransport | undefined =
-        activeTransports[sessionId];
-
-      if (!activeTransport) {
-        res.writeHead(400).end("No active transport");
-
-        return;
-      }
-
-      await activeTransport.handlePostMessage(req, res);
-
+    if (handled) {
       return;
     }
 
