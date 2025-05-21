@@ -64,7 +64,9 @@ const handleStreamRequest = async <T extends ServerLike>({
       const sessionId = Array.isArray(req.headers["mcp-session-id"])
         ? req.headers["mcp-session-id"][0]
         : req.headers["mcp-session-id"];
+
       let transport: StreamableHTTPServerTransport;
+      
       let server: T;
 
       const body = await getBody(req);
@@ -102,7 +104,6 @@ const handleStreamRequest = async <T extends ServerLike>({
           }
         };
 
-        // Create the server
         try {
           server = await createServer(req);
         } catch (error) {
