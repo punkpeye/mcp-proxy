@@ -32,7 +32,7 @@ const getBody = (request: http.IncomingMessage) => {
         resolve(JSON.parse(body));
       });
   });
-}
+};
 
 const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
@@ -91,11 +91,13 @@ const handleStreamRequest = async <T extends ServerLike>({
           const sid = transport.sessionId;
           if (sid && activeTransports[sid]) {
             onClose?.(server);
+
             try {
               await server.close();
             } catch (error) {
               console.error("Error closing server:", error);
             }
+
             delete activeTransports[sid];
           }
         };
@@ -106,16 +108,21 @@ const handleStreamRequest = async <T extends ServerLike>({
         } catch (error) {
           if (error instanceof Response) {
             res.writeHead(error.status).end(error.statusText);
+
             return true;
           }
+
           res.writeHead(500).end("Error creating server");
+
           return true;
         }
 
         server.connect(transport);
+
         onConnect?.(server);
 
         await transport.handleRequest(req, res, body);
+
         return true;
       } else {
         // Error if the server is not created but the request is not an initialize request
@@ -135,11 +142,15 @@ const handleStreamRequest = async <T extends ServerLike>({
         return true;
       }
 
-      // Handle ther request if the server is already created
+      // Handle the request if the server is already created
       await transport.handleRequest(req, res, body);
+
+      return true;
     } catch (error) {
       console.error("Error handling request:", error);
+
       res.setHeader("Content-Type", "application/json");
+
       res.writeHead(500).end(
         JSON.stringify({
           error: { code: -32603, message: "Internal Server Error" },
@@ -165,15 +176,18 @@ const handleStreamRequest = async <T extends ServerLike>({
 
     if (!sessionId) {
       res.writeHead(400).end("No sessionId");
+
       return true;
     }
 
     if (!activeTransport) {
       res.writeHead(400).end("No active transport");
+
       return true;
     }
 
     const lastEventId = req.headers["last-event-id"] as string | undefined;
+
     if (lastEventId) {
       console.log(`Client reconnecting with Last-Event-ID: ${lastEventId}`);
     } else {
@@ -181,6 +195,7 @@ const handleStreamRequest = async <T extends ServerLike>({
     }
 
     await activeTransport.transport.handleRequest(req, res);
+
     return true;
   }
 
@@ -189,25 +204,31 @@ const handleStreamRequest = async <T extends ServerLike>({
     new URL(req.url!, "http://localhost").pathname === endpoint
   ) {
     console.log("received delete request");
+
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
     if (!sessionId) {
       res.writeHead(400).end("Invalid or missing sessionId");
+
       return true;
     }
 
     console.log("received delete request for session", sessionId);
 
-    const { server, transport } = activeTransports[sessionId];
-    if (!transport) {
+    const activeTransport = activeTransports[sessionId];
+
+    if (!activeTransport) {
       res.writeHead(400).end("No active transport");
       return true;
     }
 
     try {
-      await transport.handleRequest(req, res);
-      onClose?.(server);
+      await activeTransport.transport.handleRequest(req, res);
+
+      onClose?.(activeTransport.server);
     } catch (error) {
       console.error("Error handling delete request:", error);
+
       res.writeHead(500).end("Error handling delete request");
     }
 
@@ -350,7 +371,7 @@ export const startHTTPServer = async <T extends ServerLike>({
       transport: StreamableHTTPServerTransport;
     }
   > = {};
-  
+
   /**
    * @author https://dev.classmethod.jp/articles/mcp-sse/
    */
@@ -378,29 +399,33 @@ export const startHTTPServer = async <T extends ServerLike>({
       res.writeHead(200).end("pong");
       return;
     }
-    
-    if (await handleSSERequest({
-      activeTransports: activeSSETransports,
-      createServer,
-      endpoint: "/sse",
-      onClose,
-      onConnect,
-      req,
-      res,
-    })) {
+
+    if (
+      await handleSSERequest({
+        activeTransports: activeSSETransports,
+        createServer,
+        endpoint: "/sse",
+        onClose,
+        onConnect,
+        req,
+        res,
+      })
+    ) {
       return;
     }
 
-    if (await handleStreamRequest({
-      activeTransports: activeStreamTransports,
-      createServer,
-      endpoint: "/stream",
-      eventStore,
-      onClose,
-      onConnect,
-      req,
-      res,
-    })) {
+    if (
+      await handleStreamRequest({
+        activeTransports: activeStreamTransports,
+        createServer,
+        endpoint: "/stream",
+        eventStore,
+        onClose,
+        onConnect,
+        req,
+        res,
+      })
+    ) {
       return;
     }
 
@@ -441,4 +466,3 @@ export const startHTTPServer = async <T extends ServerLike>({
     },
   };
 };
-

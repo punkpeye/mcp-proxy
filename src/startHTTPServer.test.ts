@@ -238,4 +238,3 @@ it("proxies messages between SSE and stdio servers", async () => {
 
   expect(onClose).toHaveBeenCalled();
 });
-
