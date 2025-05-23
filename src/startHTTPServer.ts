@@ -29,7 +29,12 @@ const getBody = (request: http.IncomingMessage) => {
       })
       .on("end", () => {
         body = Buffer.concat(bodyParts).toString();
-        resolve(JSON.parse(body));
+        try {
+          resolve(JSON.parse(body));
+        } catch(error) {
+          console.error("Error parsing body:", error);
+          resolve(null);
+        }
       });
   });
 };
