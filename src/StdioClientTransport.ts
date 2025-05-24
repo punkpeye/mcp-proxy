@@ -42,6 +42,11 @@ export type StdioServerParameters = {
   onEvent?: (event: TransportEvent) => void;
 
   /**
+   * When true, spawn the child process using the user's shell.
+   */
+  shell?: boolean;
+
+  /**
    * How to handle stderr of the child process. This matches the semantics of Node's `child_process.spawn`.
    *
    * The default is "inherit", meaning messages to stderr will be printed to the parent process's stderr.
@@ -138,7 +143,7 @@ export class StdioClientTransport implements Transport {
         {
           cwd: this.serverParams.cwd,
           env: this.serverParams.env,
-          shell: false,
+          shell: this.serverParams.shell ?? false,
           signal: this.abortController.signal,
           stdio: ["pipe", "pipe", this.serverParams.stderr ?? "inherit"],
         },

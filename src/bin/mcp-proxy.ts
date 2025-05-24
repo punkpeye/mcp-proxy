@@ -55,6 +55,11 @@ const argv = await yargs(hideBin(process.argv))
       describe: "The server type to use (sse or stream)",
       type: "string",
     },
+    shell: {
+      default: false,
+      describe: "Spawn the server via the user's shell",
+      type: "boolean",
+    },
   })
   .help()
   .parseAsync();
@@ -69,6 +74,7 @@ const connect = async (client: Client) => {
         console.debug("transport event", event);
       }
     },
+    shell: argv.shell,
     stderr: "pipe",
   });
 
