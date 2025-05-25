@@ -22,7 +22,7 @@ npm install mcp-proxy
 ### Command-line
 
 ```bash
-npx mcp-proxy --port 8080 tsx server.js
+npx mcp-proxy --port 8080 --shell tsx server.js
 ```
 
 This starts a server and `stdio` server (`tsx server.js`). The server listens on port 8080 and `/stream` (streamable HTTP) and `/sse` (SSE) endpoints, and forwards messages to the `stdio` server.
@@ -31,6 +31,16 @@ options:
 
 - `--port`: Specify the port to listen on (default: 8080)
 - `--debug`: Enable debug logging
+- `--shell`: Spawn the server via the user's shell
+
+> [!NOTE]
+> Any arguments starting with `-` after `<command>` are parsed as `mcp-proxy`
+> options. Insert `--` before such arguments to pass them to the wrapped
+> command. For example:
+>
+> ```bash
+> npx mcp-proxy --port 8080 --shell npx -- -y some-package
+> ```
 
 ### Node.js SDK
 
