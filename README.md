@@ -33,6 +33,15 @@ options:
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
 
+> [!NOTE]
+> Any arguments starting with `-` after `<command>` are parsed as `mcp-proxy`
+> options. Insert `--` before such arguments to pass them to the wrapped
+> command. For example:
+>
+> ```bash
+> npx mcp-proxy --port 8080 --shell npx -- -y some-package
+> ```
+
 ### Node.js SDK
 
 The Node.js SDK provides several utilities that are used to create a proxy.
