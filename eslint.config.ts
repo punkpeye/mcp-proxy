@@ -9,6 +9,12 @@ export default tseslint.config(
   perfectionist.configs["recommended-alphabetical"],
   eslintConfigPrettier,
   {
-    ignores: ["**/*.js", "pnpm-lock.yaml"],
+    ignores: [
+      "**/*.js",
+      "**/*.d.ts",
+      "dist/**",
+      "node_modules/**",
+      "pnpm-lock.yaml",
+    ],
   },
 );
