@@ -9,7 +9,7 @@ A TypeScript streamable HTTP and SSE proxy for [MCP](https://modelcontextprotoco
 > For a Python implementation, see [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy).
 
 > [!NOTE]
-> MCP Proxy is what [FastMCP](https://github.com/punkpeye/fastmcp) uses to enable SSE.
+> MCP Proxy is what [FastMCP](https://github.com/punkpeye/fastmcp) uses to enable streamable HTTP and SSE.
 
 ## Installation
 
