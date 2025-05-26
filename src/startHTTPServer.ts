@@ -390,6 +390,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         res.setHeader("Access-Control-Allow-Credentials", "true");
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         res.setHeader("Access-Control-Allow-Headers", "*");
+        res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
       } catch (error) {
         console.error("Error parsing origin:", error);
       }
