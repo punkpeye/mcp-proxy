@@ -44,16 +44,6 @@ const argv = await yargs(hideBin(process.argv))
       describe: "The endpoint to listen on",
       type: "string",
     },
-    sseEndpoint: {
-      default: "/sse",
-      describe: "The SSE endpoint to listen on",
-      type: "string",
-    },
-    streamEndpoint: {
-      default: "/stream",
-      describe: "The stream endpoint to listen on",
-      type: "string",
-    },
     port: {
       default: 8080,
       describe: "The port to listen on",
@@ -68,6 +58,16 @@ const argv = await yargs(hideBin(process.argv))
       default: false,
       describe: "Spawn the server via the user's shell",
       type: "boolean",
+    },
+    sseEndpoint: {
+      default: "/sse",
+      describe: "The SSE endpoint to listen on",
+      type: "string",
+    },
+    streamEndpoint: {
+      default: "/stream",
+      describe: "The stream endpoint to listen on",
+      type: "string",
     },
   })
   .help()

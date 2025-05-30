@@ -369,8 +369,8 @@ export const startHTTPServer = async <T extends ServerLike>({
     res: http.ServerResponse,
   ) => Promise<void>;
   port: number;
-  sseEndpoint?: string | null;
-  streamEndpoint?: string | null;
+  sseEndpoint?: null | string;
+  streamEndpoint?: null | string;
 }): Promise<SSEServer> => {
   const activeSSETransports: Record<string, SSEServerTransport> = {};
 
