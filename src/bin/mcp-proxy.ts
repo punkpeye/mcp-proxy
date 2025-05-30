@@ -51,14 +51,23 @@ const argv = await yargs(hideBin(process.argv))
     },
     server: {
       choices: ["sse", "stream"],
-      default: "sse",
-      describe: "The server type to use (sse or stream)",
+      describe: "The server type to use (sse or stream). By default, both are enabled",
       type: "string",
     },
     shell: {
       default: false,
       describe: "Spawn the server via the user's shell",
       type: "boolean",
+    },
+    sseEndpoint: {
+      default: "/sse",
+      describe: "The SSE endpoint to listen on",
+      type: "string",
+    },
+    streamEndpoint: {
+      default: "/stream",
+      describe: "The stream endpoint to listen on",
+      type: "string",
     },
   })
   .help()
@@ -123,6 +132,8 @@ const proxy = async () => {
     createServer,
     eventStore: new InMemoryEventStore(),
     port: argv.port,
+    sseEndpoint: argv.server && argv.server !== "sse" ? null : (argv.sseEndpoint ?? argv.endpoint),
+    streamEndpoint: argv.server && argv.server !== "stream" ? null : (argv.streamEndpoint ?? argv.endpoint),
   });
 };
 
