@@ -29,6 +29,10 @@ This starts a server and `stdio` server (`tsx server.js`). The server listens on
 
 options:
 
+- `--server`: Set to `sse` or `stream` to only enable the respective transport (default: both)
+- `--endpoint`: If `server` is set to `sse` or `stream`, this option sets the endpoint path (default: `/sse` or `/stream`)
+- `--sseEndpoint`: Set the SSE endpoint path (default: `/sse`). Overrides `--endpoint` if `server` is set to `sse`.
+- `--streamEndpoint`: Set the streamable HTTP endpoint path (default: `/stream`). Overrides `--endpoint` if `server` is set to `stream`.
 - `--port`: Specify the port to listen on (default: 8080)
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
