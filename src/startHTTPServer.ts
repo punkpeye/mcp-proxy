@@ -431,7 +431,7 @@ export const startHTTPServer = async <T extends ServerLike>({
       await handleStreamRequest({
         activeTransports: activeStreamTransports,
         createServer,
-        endpoint: streamEndpoint ?? "/stream",
+        endpoint: streamEndpoint ?? "/mcp",
         eventStore,
         onClose,
         onConnect,

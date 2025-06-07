@@ -78,7 +78,7 @@ it("proxies messages between HTTP stream and stdio servers", async () => {
   );
 
   const transport = new StreamableHTTPClientTransport(
-    new URL(`http://localhost:${port}/stream`),
+    new URL(`http://localhost:${port}/mcp`),
   );
 
   await streamClient.connect(transport);

@@ -65,7 +65,7 @@ const argv = await yargs(hideBin(process.argv))
       type: "string",
     },
     streamEndpoint: {
-      default: "/stream",
+      default: "/mcp",
       describe: "The stream endpoint to listen on",
       type: "string",
     },
