@@ -262,8 +262,8 @@ const handleSSERequest = async <T extends ServerLike>({
   activeTransports: Record<string, SSEServerTransport>;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   endpoint: string;
-  onClose?: (server: T) => void;
-  onConnect?: (server: T) => void;
+  onClose?: (server: T) => Promise<void>;
+  onConnect?: (server: T) => Promise<void>;
   req: http.IncomingMessage;
   res: http.ServerResponse;
 }) => {
