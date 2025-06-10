@@ -45,8 +45,8 @@ it("proxies messages between HTTP stream and stdio servers", async () => {
 
   const port = await getRandomPort();
 
-  const onConnect = vi.fn();
-  const onClose = vi.fn();
+  const onConnect = vi.fn().mockResolvedValue(undefined);
+  const onClose = vi.fn().mockResolvedValue(undefined);
 
   await startHTTPServer({
     createServer: async () => {

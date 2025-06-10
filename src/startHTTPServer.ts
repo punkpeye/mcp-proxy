@@ -56,8 +56,8 @@ const handleStreamRequest = async <T extends ServerLike>({
   createServer: (request: http.IncomingMessage) => Promise<T>;
   endpoint: string;
   eventStore?: EventStore;
-  onClose?: (server: T) => void;
-  onConnect?: (server: T) => void;
+  onClose?: (server: T) => Promise<void>;
+  onConnect?: (server: T) => Promise<void>;
   req: http.IncomingMessage;
   res: http.ServerResponse;
 }) => {
@@ -97,7 +97,9 @@ const handleStreamRequest = async <T extends ServerLike>({
         transport.onclose = async () => {
           const sid = transport.sessionId;
           if (sid && activeTransports[sid]) {
-            onClose?.(server);
+            if (onClose) {
+              await onClose(server);
+            }
 
             try {
               await server.close();
@@ -125,7 +127,9 @@ const handleStreamRequest = async <T extends ServerLike>({
 
         server.connect(transport);
 
-        onConnect?.(server);
+        if (onConnect) {
+          await onConnect(server);
+        }
 
         await transport.handleRequest(req, res, body);
 
@@ -231,7 +235,9 @@ const handleStreamRequest = async <T extends ServerLike>({
     try {
       await activeTransport.transport.handleRequest(req, res);
 
-      onClose?.(activeTransport.server);
+      if (onClose) {
+        await onClose(activeTransport.server);
+      }
     } catch (error) {
       console.error("Error handling delete request:", error);
 
@@ -298,7 +304,7 @@ const handleSSERequest = async <T extends ServerLike>({
 
       delete activeTransports[transport.sessionId];
 
-      onClose?.(server);
+      await onClose?.(server);
     });
 
     try {
@@ -310,7 +316,9 @@ const handleSSERequest = async <T extends ServerLike>({
         params: { message: "SSE Connection established" },
       });
 
-      onConnect?.(server);
+      if (onConnect) {
+        await onConnect(server);
+      }
     } catch (error) {
       if (!closed) {
         console.error("Error connecting to server:", error);
@@ -362,8 +370,8 @@ export const startHTTPServer = async <T extends ServerLike>({
 }: {
   createServer: (request: http.IncomingMessage) => Promise<T>;
   eventStore?: EventStore;
-  onClose?: (server: T) => void;
-  onConnect?: (server: T) => void;
+  onClose?: (server: T) => Promise<void>;
+  onConnect?: (server: T) => Promise<void>;
   onUnhandledRequest?: (
     req: http.IncomingMessage,
     res: http.ServerResponse,
