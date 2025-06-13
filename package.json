@@ -22,9 +22,9 @@
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.11.4",
+    "@modelcontextprotocol/sdk": "^1.12.1",
     "eventsource": "^4.0.0",
-    "yargs": "^17.7.2"
+    "yargs": "^18.0.0"
   },
   "repository": {
     "url": "https://github.com/punkpeye/mcp-proxy"
@@ -43,26 +43,26 @@
     ]
   },
   "devDependencies": {
-    "@eslint/js": "^9.27.0",
+    "@eslint/js": "^9.28.0",
     "@sebbo2002/semantic-release-jsr": "^3.0.0",
     "@tsconfig/node22": "^22.0.2",
-    "@types/express": "^5.0.2",
-    "@types/node": "^22.15.21",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.1",
     "@types/yargs": "^17.0.33",
-    "eslint": "^9.27.0",
+    "eslint": "^9.28.0",
     "eslint-config-prettier": "^10.1.5",
-    "eslint-plugin-perfectionist": "^4.13.0",
+    "eslint-plugin-perfectionist": "^4.14.0",
     "express": "^5.0.1",
     "get-port-please": "^3.1.2",
     "jiti": "^2.4.2",
     "jsr": "^0.13.4",
     "prettier": "^3.5.3",
-    "semantic-release": "^24.2.4",
+    "semantic-release": "^24.2.5",
     "tsup": "^8.5.0",
-    "tsx": "^4.19.3",
+    "tsx": "^4.20.2",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.32.1",
-    "vitest": "^3.1.4"
+    "typescript-eslint": "^8.34.0",
+    "vitest": "^3.2.3"
   },
   "tsup": {
     "entry": [
