@@ -11,6 +11,8 @@ import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { ChildProcess, IOType, spawn } from "node:child_process";
 import { Stream } from "node:stream";
 
+import { JSONFilterTransform } from "./JSONFilterTransform.js";
+
 export type StdioServerParameters = {
   /**
    * Command line arguments to pass to the executable.
@@ -78,6 +80,7 @@ type TransportEvent =
  */
 export class StdioClientTransport implements Transport {
   onclose?: () => void;
+
   onerror?: (error: Error) => void;
   onmessage?: (message: JSONRPCMessage) => void;
   /**
@@ -151,7 +154,6 @@ export class StdioClientTransport implements Transport {
 
       this.process.on("error", (error) => {
         if (error.name === "AbortError") {
-          // Expected when close() is called.
           this.onclose?.();
           return;
         }
@@ -183,7 +185,11 @@ export class StdioClientTransport implements Transport {
         this.onerror?.(error);
       });
 
-      this.process.stdout?.on("data", (chunk) => {
+      const jsonFilterTransform = new JSONFilterTransform();
+
+      this.process.stdout?.pipe(jsonFilterTransform);
+
+      jsonFilterTransform.on("data", (chunk) => {
         this.onEvent?.({
           chunk: chunk.toString(),
           type: "data",
@@ -193,7 +199,7 @@ export class StdioClientTransport implements Transport {
         this.processReadBuffer();
       });
 
-      this.process.stdout?.on("error", (error) => {
+      jsonFilterTransform.on("error", (error) => {
         this.onEvent?.({
           error,
           type: "error",

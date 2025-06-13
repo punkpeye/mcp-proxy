@@ -61,6 +61,7 @@ export class InMemoryEventStore implements EventStore {
         await send(eventId, message);
       }
     }
+    
     return streamId;
   }
 
@@ -86,6 +87,7 @@ export class InMemoryEventStore implements EventStore {
    */
   private getStreamIdFromEventId(eventId: string): string {
     const parts = eventId.split("_");
+
     return parts.length > 0 ? parts[0] : "";
   }
 }

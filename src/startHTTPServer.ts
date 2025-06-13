@@ -32,7 +32,7 @@ const getBody = (request: http.IncomingMessage) => {
         try {
           resolve(JSON.parse(body));
         } catch(error) {
-          console.error("Error parsing body:", error);
+          console.error("[mcp-proxy] error parsing body", error);
           resolve(null);
         }
       });
@@ -104,7 +104,7 @@ const handleStreamRequest = async <T extends ServerLike>({
             try {
               await server.close();
             } catch (error) {
-              console.error("Error closing server:", error);
+              console.error("[mcp-proxy] error closing server", error);
             }
 
             delete activeTransports[sid];
@@ -157,7 +157,7 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       return true;
     } catch (error) {
-      console.error("Error handling request:", error);
+      console.error("[mcp-proxy] error handling request", error);
 
       res.setHeader("Content-Type", "application/json");
 
@@ -199,9 +199,9 @@ const handleStreamRequest = async <T extends ServerLike>({
     const lastEventId = req.headers["last-event-id"] as string | undefined;
 
     if (lastEventId) {
-      console.log(`Client reconnecting with Last-Event-ID: ${lastEventId}`);
+      console.log(`[mcp-proxy] client reconnecting with Last-Event-ID ${lastEventId} for session ID ${sessionId}`);
     } else {
-      console.log(`Establishing new SSE stream for session ${sessionId}`);
+      console.log(`[mcp-proxy] establishing new SSE stream for session ID ${sessionId}`);
     }
 
     await activeTransport.transport.handleRequest(req, res);
@@ -213,7 +213,7 @@ const handleStreamRequest = async <T extends ServerLike>({
     req.method === "DELETE" &&
     new URL(req.url!, "http://localhost").pathname === endpoint
   ) {
-    console.log("received delete request");
+    console.log("[mcp-proxy] received delete request");
 
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
@@ -223,7 +223,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       return true;
     }
 
-    console.log("received delete request for session", sessionId);
+    console.log("[mcp-proxy] received delete request for session", sessionId);
 
     const activeTransport = activeTransports[sessionId];
 
@@ -239,7 +239,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         await onClose(activeTransport.server);
       }
     } catch (error) {
-      console.error("Error handling delete request:", error);
+      console.error("[mcp-proxy] error handling delete request", error);
 
       res.writeHead(500).end("Error handling delete request");
     }
@@ -299,7 +299,7 @@ const handleSSERequest = async <T extends ServerLike>({
       try {
         await server.close();
       } catch (error) {
-        console.error("Error closing server:", error);
+        console.error("[mcp-proxy] error closing server", error);
       }
 
       delete activeTransports[transport.sessionId];
@@ -321,7 +321,7 @@ const handleSSERequest = async <T extends ServerLike>({
       }
     } catch (error) {
       if (!closed) {
-        console.error("Error connecting to server:", error);
+        console.error("[mcp-proxy] error connecting to server", error);
 
         res.writeHead(500).end("Error connecting to server");
       }
@@ -404,7 +404,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         res.setHeader("Access-Control-Allow-Headers", "*");
         res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
       } catch (error) {
-        console.error("Error parsing origin:", error);
+        console.error("[mcp-proxy] error parsing origin", error);
       }
     }
 

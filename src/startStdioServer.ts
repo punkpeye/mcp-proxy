@@ -50,6 +50,7 @@ export const startStdioServer = async ({
           capabilities: {},
         },
       );
+  
   await streamClient.connect(transport);
 
   const serverVersion = streamClient.getServerVersion() as {
