@@ -79,15 +79,15 @@ const handleStreamRequest = async <T extends ServerLike>({
       if (sessionId) {
         const activeTransport = activeTransports[sessionId];
         if (!activeTransport) {
-          res.setHeader('Content-Type', 'application/json');
+          res.setHeader("Content-Type", "application/json");
           res.writeHead(404).end(
             JSON.stringify({
               error: {
                 code: -32001,
-                message: 'Session not found',
+                message: "Session not found",
               },
               id: null,
-              jsonrpc: '2.0',
+              jsonrpc: "2.0",
             })
           );
 
@@ -121,7 +121,7 @@ const handleStreamRequest = async <T extends ServerLike>({
             try {
               await server.close();
             } catch (error) {
-              console.error('[mcp-proxy] error closing server', error);
+              console.error("[mcp-proxy] error closing server", error);
             }
 
             delete activeTransports[sid];
@@ -137,7 +137,7 @@ const handleStreamRequest = async <T extends ServerLike>({
             return true;
           }
 
-          res.writeHead(500).end('Error creating server');
+          res.writeHead(500).end("Error creating server");
 
           return true;
         }
@@ -153,16 +153,16 @@ const handleStreamRequest = async <T extends ServerLike>({
         return true;
       } else {
         // Error if the server is not created but the request is not an initialize request
-        res.setHeader('Content-Type', 'application/json');
+        res.setHeader("Content-Type", "application/json");
 
         res.writeHead(400).end(
           JSON.stringify({
             error: {
               code: -32000,
-              message: 'Bad Request: No valid session ID provided',
+              message: "Bad Request: No valid session ID provided",
             },
             id: null,
-            jsonrpc: '2.0',
+            jsonrpc: "2.0",
           })
         );
 
