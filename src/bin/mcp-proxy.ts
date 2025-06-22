@@ -6,7 +6,6 @@ import { EventSource } from "eventsource";
 import { setTimeout } from "node:timers";
 import util from "node:util";
 import yargs from "yargs";
-import { hideBin } from "yargs/helpers";
 
 import { InMemoryEventStore } from "../InMemoryEventStore.js";
 import { proxyServer } from "../proxyServer.js";
@@ -20,17 +19,34 @@ if (!("EventSource" in global)) {
   global.EventSource = EventSource;
 }
 
-const argv = await yargs(hideBin(process.argv))
+// Handle the -- separator properly
+const processArgs = process.argv.slice(2); // Remove 'node' and script name
+const doubleDashIndex = processArgs.indexOf("--");
+
+let mcpProxyArgs: string[];
+let commandAndArgs: string[];
+
+if (doubleDashIndex !== -1) {
+  // Split at -- separator
+  mcpProxyArgs = processArgs.slice(0, doubleDashIndex);
+  commandAndArgs = processArgs.slice(doubleDashIndex + 1);
+} else {
+  // No -- separator, use traditional parsing
+  mcpProxyArgs = processArgs;
+  commandAndArgs = [];
+}
+
+const argv = await yargs(mcpProxyArgs)
   .scriptName("mcp-proxy")
-  .command("$0 <command> [args...]", "Run a command with MCP arguments")
+  .command("$0 [command] [args...]", "Run a command with MCP arguments")
   .positional("command", {
-    demandOption: true,
+    demandOption: doubleDashIndex === -1,  // Only required if no -- separator
     describe: "The command to run",
     type: "string",
   })
   .positional("args", {
     array: true,
-    describe: "The arguments to pass to the command",
+    describe: "The arguments to pass to the command",  
     type: "string",
   })
   .env("MCP_PROXY")
@@ -73,10 +89,31 @@ const argv = await yargs(hideBin(process.argv))
   .help()
   .parseAsync();
 
+// Determine the final command and args
+let finalCommand: string;
+let finalArgs: string[] | undefined;
+
+if (doubleDashIndex !== -1) {
+  // When using --, command comes from yargs parsing (before --) 
+  // and args come from after -- separator
+  if (!argv.command) {
+    throw new Error("No command specified before -- separator");
+  }
+  finalCommand = argv.command;
+  finalArgs = commandAndArgs; // Everything after -- becomes arguments
+} else {
+  // Use command and args from yargs parsing
+  if (!argv.command) {
+    throw new Error("No command specified");
+  }
+  finalCommand = argv.command;
+  finalArgs = argv.args;
+}
+
 const connect = async (client: Client) => {
   const transport = new StdioClientTransport({
-    args: argv.args,
-    command: argv.command,
+    args: finalArgs,
+    command: finalCommand,
     env: process.env as Record<string, string>,
     onEvent: (event) => {
       if (argv.debug) {
