@@ -19,28 +19,11 @@ if (!("EventSource" in global)) {
   global.EventSource = EventSource;
 }
 
-// Handle the -- separator properly
-const processArgs = process.argv.slice(2); // Remove 'node' and script name
-const doubleDashIndex = processArgs.indexOf("--");
-
-let mcpProxyArgs: string[];
-let commandAndArgs: string[];
-
-if (doubleDashIndex !== -1) {
-  // Split at -- separator
-  mcpProxyArgs = processArgs.slice(0, doubleDashIndex);
-  commandAndArgs = processArgs.slice(doubleDashIndex + 1);
-} else {
-  // No -- separator, use traditional parsing
-  mcpProxyArgs = processArgs;
-  commandAndArgs = [];
-}
-
-const argv = await yargs(mcpProxyArgs)
+const argv = await yargs(process.argv.slice(2))
   .scriptName("mcp-proxy")
   .command("$0 [command] [args...]", "Run a command with MCP arguments")
   .positional("command", {
-    demandOption: doubleDashIndex === -1,  // Only required if no -- separator
+    demandOption: true,
     describe: "The command to run",
     type: "string",
   })
@@ -50,6 +33,9 @@ const argv = await yargs(mcpProxyArgs)
     type: "string",
   })
   .env("MCP_PROXY")
+  .parserConfiguration({
+    "populate--": true
+  })
   .options({
     debug: {
       default: false,
@@ -90,25 +76,13 @@ const argv = await yargs(mcpProxyArgs)
   .parseAsync();
 
 // Determine the final command and args
-let finalCommand: string;
-let finalArgs: string[] | undefined;
-
-if (doubleDashIndex !== -1) {
-  // When using --, command comes from yargs parsing (before --) 
-  // and args come from after -- separator
-  if (!argv.command) {
-    throw new Error("No command specified before -- separator");
-  }
-  finalCommand = argv.command;
-  finalArgs = commandAndArgs; // Everything after -- becomes arguments
-} else {
-  // Use command and args from yargs parsing
-  if (!argv.command) {
-    throw new Error("No command specified");
-  }
-  finalCommand = argv.command;
-  finalArgs = argv.args;
+if (!argv.command) {
+  throw new Error("No command specified");
 }
+
+const finalCommand = argv.command;
+// If -- separator was used, args after -- are in argv["--"], otherwise use parsed args
+const finalArgs = (argv["--"] as string[]) || argv.args;
 
 const connect = async (client: Client) => {
   const transport = new StdioClientTransport({
