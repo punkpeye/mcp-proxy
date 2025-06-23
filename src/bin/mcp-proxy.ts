@@ -6,7 +6,6 @@ import { EventSource } from "eventsource";
 import { setTimeout } from "node:timers";
 import util from "node:util";
 import yargs from "yargs";
-import { hideBin } from "yargs/helpers";
 
 import { InMemoryEventStore } from "../InMemoryEventStore.js";
 import { proxyServer } from "../proxyServer.js";
@@ -20,9 +19,9 @@ if (!("EventSource" in global)) {
   global.EventSource = EventSource;
 }
 
-const argv = await yargs(hideBin(process.argv))
+const argv = await yargs(process.argv.slice(2))
   .scriptName("mcp-proxy")
-  .command("$0 <command> [args...]", "Run a command with MCP arguments")
+  .command("$0 [command] [args...]", "Run a command with MCP arguments")
   .positional("command", {
     demandOption: true,
     describe: "The command to run",
@@ -30,10 +29,13 @@ const argv = await yargs(hideBin(process.argv))
   })
   .positional("args", {
     array: true,
-    describe: "The arguments to pass to the command",
+    describe: "The arguments to pass to the command",  
     type: "string",
   })
   .env("MCP_PROXY")
+  .parserConfiguration({
+    "populate--": true
+  })
   .options({
     debug: {
       default: false,
@@ -73,10 +75,19 @@ const argv = await yargs(hideBin(process.argv))
   .help()
   .parseAsync();
 
+// Determine the final command and args
+if (!argv.command) {
+  throw new Error("No command specified");
+}
+
+const finalCommand = argv.command;
+// If -- separator was used, args after -- are in argv["--"], otherwise use parsed args
+const finalArgs = (argv["--"] as string[]) || argv.args;
+
 const connect = async (client: Client) => {
   const transport = new StdioClientTransport({
-    args: argv.args,
-    command: argv.command,
+    args: finalArgs,
+    command: finalCommand,
     env: process.env as Record<string, string>,
     onEvent: (event) => {
       if (argv.debug) {
