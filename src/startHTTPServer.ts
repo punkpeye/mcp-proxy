@@ -378,6 +378,7 @@ const handleSSERequest = async <T extends ServerLike>({
 export const startHTTPServer = async <T extends ServerLike>({
   createServer,
   eventStore,
+  host = "::",
   onClose,
   onConnect,
   onUnhandledRequest,
@@ -387,6 +388,7 @@ export const startHTTPServer = async <T extends ServerLike>({
 }: {
   createServer: (request: http.IncomingMessage) => Promise<T>;
   eventStore?: EventStore;
+  host: string;
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
   onUnhandledRequest?: (
@@ -475,7 +477,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   });
 
   await new Promise((resolve) => {
-    httpServer.listen(port, "::", () => {
+    httpServer.listen(port, host, () => {
       resolve(undefined);
     });
   });

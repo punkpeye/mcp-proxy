@@ -47,6 +47,11 @@ const argv = await yargs(hideBin(process.argv))
       describe: "The endpoint to listen on",
       type: "string",
     },
+    host: {
+      default: "::",
+      describe: "The host to listen on",
+      type: "string",
+    },
     port: {
       default: 8080,
       describe: "The port to listen on",
@@ -143,6 +148,7 @@ const proxy = async () => {
   await startHTTPServer({
     createServer,
     eventStore: new InMemoryEventStore(),
+    host: argv.host,
     port: argv.port,
     sseEndpoint: argv.server && argv.server !== "sse" ? null : (argv.sseEndpoint ?? argv.endpoint),
     streamEndpoint: argv.server && argv.server !== "stream" ? null : (argv.streamEndpoint ?? argv.endpoint),
