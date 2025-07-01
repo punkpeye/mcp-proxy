@@ -31,6 +31,7 @@ export class InMemoryEventStore implements EventStore {
 
     // Extract the stream ID from the event ID
     const streamId = this.getStreamIdFromEventId(lastEventId);
+
     if (!streamId) {
       return "";
     }
@@ -71,7 +72,9 @@ export class InMemoryEventStore implements EventStore {
    */
   async storeEvent(streamId: string, message: JSONRPCMessage): Promise<string> {
     const eventId = this.generateEventId(streamId);
+    
     this.events.set(eventId, { message, streamId });
+
     return eventId;
   }
 

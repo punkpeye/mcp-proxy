@@ -392,7 +392,7 @@ export const startHTTPServer = async <T extends ServerLike>({
 }: {
   createServer: (request: http.IncomingMessage) => Promise<T>;
   eventStore?: EventStore;
-  host: string;
+  host?: string;
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
   onUnhandledRequest?: (
