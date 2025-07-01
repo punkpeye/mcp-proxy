@@ -6,6 +6,7 @@ import { EventSource } from "eventsource";
 import { setTimeout } from "node:timers";
 import util from "node:util";
 import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
 
 import { InMemoryEventStore } from "../InMemoryEventStore.js";
 import { proxyServer } from "../proxyServer.js";
@@ -19,9 +20,9 @@ if (!("EventSource" in global)) {
   global.EventSource = EventSource;
 }
 
-const argv = await yargs(process.argv.slice(2))
+const argv = await yargs(hideBin(process.argv))
   .scriptName("mcp-proxy")
-  .command("$0 [command] [args...]", "Run a command with MCP arguments")
+  .command("$0 <command> [args...]", "Run a command with MCP arguments")
   .positional("command", {
     demandOption: true,
     describe: "The command to run",
@@ -29,7 +30,7 @@ const argv = await yargs(process.argv.slice(2))
   })
   .positional("args", {
     array: true,
-    describe: "The arguments to pass to the command",  
+    describe: "The arguments to pass to the command",
     type: "string",
   })
   .env("MCP_PROXY")
