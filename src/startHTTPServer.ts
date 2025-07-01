@@ -76,9 +76,26 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       const body = await getBody(req);
 
-      if (sessionId && activeTransports[sessionId]) {
-        transport = activeTransports[sessionId].transport;
-        server = activeTransports[sessionId].server;
+      if (sessionId) {
+        const activeTransport = activeTransports[sessionId];
+        if (!activeTransport) {
+          res.setHeader("Content-Type", "application/json");
+          res.writeHead(404).end(
+            JSON.stringify({
+              error: {
+                code: -32001,
+                message: "Session not found",
+              },
+              id: null,
+              jsonrpc: "2.0",
+            })
+          );
+
+          return true;
+        }
+
+        transport = activeTransport.transport;
+        server = activeTransport.server;
       } else if (!sessionId && isInitializeRequest(body)) {
         // Create a new transport for the session
         transport = new StreamableHTTPServerTransport({
@@ -146,7 +163,7 @@ const handleStreamRequest = async <T extends ServerLike>({
             },
             id: null,
             jsonrpc: "2.0",
-          }),
+          })
         );
 
         return true;
