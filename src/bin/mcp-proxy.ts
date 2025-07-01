@@ -34,6 +34,9 @@ const argv = await yargs(hideBin(process.argv))
     type: "string",
   })
   .env("MCP_PROXY")
+  .parserConfiguration({
+    "populate--": true
+  })
   .options({
     debug: {
       default: false,
@@ -73,10 +76,19 @@ const argv = await yargs(hideBin(process.argv))
   .help()
   .parseAsync();
 
+// Determine the final command and args
+if (!argv.command) {
+  throw new Error("No command specified");
+}
+
+const finalCommand = argv.command;
+// If -- separator was used, args after -- are in argv["--"], otherwise use parsed args
+const finalArgs = (argv["--"] as string[]) || argv.args;
+
 const connect = async (client: Client) => {
   const transport = new StdioClientTransport({
-    args: argv.args,
-    command: argv.command,
+    args: finalArgs,
+    command: finalCommand,
     env: process.env as Record<string, string>,
     onEvent: (event) => {
       if (argv.debug) {
