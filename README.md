@@ -37,14 +37,19 @@ options:
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
 
-> [!NOTE]
-> Any arguments starting with `-` after `<command>` are parsed as `mcp-proxy`
-> options. Insert `--` before such arguments to pass them to the wrapped
-> command. For example:
->
-> ```bash
-> npx mcp-proxy --port 8080 --shell npx -- -y some-package
-> ```
+### Passing arguments to the wrapped command
+
+When wrapping a command that takes arguments starting with `-`, you must use `--` to prevent `mcp-proxy` from interpreting them as its own options. Everything after `--` is passed directly to the wrapped command.
+
+For example, to wrap a command that uses the `-v` flag:
+
+```bash
+# Wrong: mcp-proxy will try to parse -v as its own option
+npx mcp-proxy --port 8080 my-command -v
+
+# Correct: use -- to pass -v to my-command
+npx mcp-proxy --port 8080 -- my-command -v
+```
 
 ### Node.js SDK
 
