@@ -161,7 +161,7 @@ const main = async () => {
 
     setTimeout(() => {
       process.exit(0);
-    }, 1000);
+    }, 100);
   });
 
   try {
@@ -171,7 +171,7 @@ const main = async () => {
 
     setTimeout(() => {
       process.exit(1);
-    }, 1000);
+    }, 100);
   }
 };
 
