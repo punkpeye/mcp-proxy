@@ -18,7 +18,7 @@ if (!("EventSource" in global)) {
 
 it("proxies messages between HTTP stream and stdio servers", async () => {
   const stdioTransport = new StdioClientTransport({
-    args: ["src/simple-stdio-server.ts"],
+    args: ["src/fixtures/simple-stdio-server.ts"],
     command: "tsx",
   });
 
@@ -131,7 +131,7 @@ it("proxies messages between HTTP stream and stdio servers", async () => {
 
 it("proxies messages between SSE and stdio servers", async () => {
   const stdioTransport = new StdioClientTransport({
-    args: ["src/simple-stdio-server.ts"],
+    args: ["src/fixtures/simple-stdio-server.ts"],
     command: "tsx",
   });
 

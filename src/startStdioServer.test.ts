@@ -43,7 +43,7 @@ describe("startStdioServer.test.ts", () => {
   it("proxies messages between stdio and sse servers", async () => {
     const stdioTransport = new StdioClientTransport({
       args: [
-        "src/simple-stdio-proxy-server.ts",
+        "src/fixtures/simple-stdio-proxy-server.ts",
         JSON.stringify({
           serverType: ServerType.SSE,
           url: "http://127.0.0.1:3000/sse",
@@ -137,7 +137,7 @@ describe("startStdioServer.test.ts", () => {
   it("proxies messages between stdio and stream able servers", async () => {
     const stdioTransport = new StdioClientTransport({
       args: [
-        "src/simple-stdio-proxy-server.ts",
+        "src/fixtures/simple-stdio-proxy-server.ts",
         JSON.stringify({
           serverType: ServerType.HTTPStream,
           url: "http://127.0.0.1:3000/mcp",
