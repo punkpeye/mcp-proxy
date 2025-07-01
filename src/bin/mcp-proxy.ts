@@ -47,6 +47,11 @@ const argv = await yargs(hideBin(process.argv))
       describe: "The endpoint to listen on",
       type: "string",
     },
+    gracefulShutdownTimeout: {
+      default: 5000,
+      describe: "The timeout (in milliseconds) for graceful shutdown",
+      type: "number",
+    },
     host: {
       default: "::",
       describe: "The host to listen on",
@@ -179,7 +184,7 @@ const main = async () => {
 
       setTimeout(() => {
         process.exit(0);
-      }, 1000).unref();
+      }, argv.gracefulShutdownTimeout).unref();
     });
   } catch (error) {
     console.error("could not start the proxy", error);
