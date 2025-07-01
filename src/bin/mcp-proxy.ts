@@ -10,7 +10,7 @@ import { hideBin } from "yargs/helpers";
 
 import { InMemoryEventStore } from "../InMemoryEventStore.js";
 import { proxyServer } from "../proxyServer.js";
-import { startHTTPServer } from "../startHTTPServer.js";
+import { SSEServer, startHTTPServer } from "../startHTTPServer.js";
 import { StdioClientTransport } from "../StdioClientTransport.js";
 
 util.inspect.defaultOptions.depth = 8;
@@ -173,18 +173,39 @@ const proxy = async () => {
   };
 };
 
+const createGracefulShutdown = ({
+  server,
+  timeout,
+}: {
+  server: SSEServer;
+  timeout: number;
+}) => {
+  const gracefulShutdown = () => {
+    console.info("received shutdown signal; shutting down");
+
+    server.close();
+
+    setTimeout(() => {
+      // Exit with non-zero code to indicate failure to shutdown gracefully
+      process.exit(1);
+    }, timeout).unref();
+  };
+
+  process.on("SIGTERM", gracefulShutdown);
+  process.on("SIGINT", gracefulShutdown);
+
+  return () => {
+    server.close();
+  };
+};
+
 const main = async () => {
   try {
     const server = await proxy();
 
-    process.on("SIGINT", () => {
-      console.info("SIGINT received, shutting down");
-
-      server.close();
-
-      setTimeout(() => {
-        process.exit(0);
-      }, argv.gracefulShutdownTimeout).unref();
+    createGracefulShutdown({
+      server,
+      timeout: argv.gracefulShutdownTimeout,
     });
   } catch (error) {
     console.error("could not start the proxy", error);

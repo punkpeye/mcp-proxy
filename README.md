@@ -119,3 +119,11 @@ const transport = tapTransport(new StdioClientTransport(), (event) => {
   console.log(event);
 });
 ```
+
+## Development
+
+### Running MCP Proxy with a local server
+
+```bash
+tsx src/bin/mcp-proxy.ts --debug tsx src/fixtures/simple-stdio-server.ts
+```
