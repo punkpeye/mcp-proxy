@@ -31,7 +31,7 @@ const getBody = (request: http.IncomingMessage) => {
         body = Buffer.concat(bodyParts).toString();
         try {
           resolve(JSON.parse(body));
-        } catch(error) {
+        } catch (error) {
           console.error("[mcp-proxy] error parsing body", error);
           resolve(null);
         }
@@ -71,7 +71,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         : req.headers["mcp-session-id"];
 
       let transport: StreamableHTTPServerTransport;
-      
+
       let server: T;
 
       const body = await getBody(req);
@@ -88,7 +88,7 @@ const handleStreamRequest = async <T extends ServerLike>({
               },
               id: null,
               jsonrpc: "2.0",
-            })
+            }),
           );
 
           return true;
@@ -163,7 +163,7 @@ const handleStreamRequest = async <T extends ServerLike>({
             },
             id: null,
             jsonrpc: "2.0",
-          })
+          }),
         );
 
         return true;
@@ -216,9 +216,13 @@ const handleStreamRequest = async <T extends ServerLike>({
     const lastEventId = req.headers["last-event-id"] as string | undefined;
 
     if (lastEventId) {
-      console.log(`[mcp-proxy] client reconnecting with Last-Event-ID ${lastEventId} for session ID ${sessionId}`);
+      console.log(
+        `[mcp-proxy] client reconnecting with Last-Event-ID ${lastEventId} for session ID ${sessionId}`,
+      );
     } else {
-      console.log(`[mcp-proxy] establishing new SSE stream for session ID ${sessionId}`);
+      console.log(
+        `[mcp-proxy] establishing new SSE stream for session ID ${sessionId}`,
+      );
     }
 
     await activeTransport.transport.handleRequest(req, res);
@@ -440,7 +444,7 @@ export const startHTTPServer = async <T extends ServerLike>({
 
     if (
       sseEndpoint &&
-      await handleSSERequest({
+      (await handleSSERequest({
         activeTransports: activeSSETransports,
         createServer,
         endpoint: sseEndpoint,
@@ -448,14 +452,14 @@ export const startHTTPServer = async <T extends ServerLike>({
         onConnect,
         req,
         res,
-      })
+      }))
     ) {
       return;
     }
 
     if (
       streamEndpoint &&
-      await handleStreamRequest({
+      (await handleStreamRequest({
         activeTransports: activeStreamTransports,
         createServer,
         endpoint: streamEndpoint,
@@ -464,7 +468,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         onConnect,
         req,
         res,
-      })
+      }))
     ) {
       return;
     }

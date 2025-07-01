@@ -61,7 +61,7 @@ export class InMemoryEventStore implements EventStore {
         await send(eventId, message);
       }
     }
-    
+
     return streamId;
   }
 

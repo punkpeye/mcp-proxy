@@ -104,7 +104,7 @@ describe("startStdioServer.test.ts", () => {
         },
       ],
     });
-    
+
     const request = {
       method: "tools/call",
       params: {

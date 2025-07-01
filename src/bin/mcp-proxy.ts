@@ -35,7 +35,7 @@ const argv = await yargs(hideBin(process.argv))
   })
   .env("MCP_PROXY")
   .parserConfiguration({
-    "populate--": true
+    "populate--": true,
   })
   .options({
     debug: {
@@ -59,7 +59,8 @@ const argv = await yargs(hideBin(process.argv))
     },
     server: {
       choices: ["sse", "stream"],
-      describe: "The server type to use (sse or stream). By default, both are enabled",
+      describe:
+        "The server type to use (sse or stream). By default, both are enabled",
       type: "string",
     },
     shell: {
@@ -145,33 +146,47 @@ const proxy = async () => {
     return server;
   };
 
-  await startHTTPServer({
+  const server = await startHTTPServer({
     createServer,
     eventStore: new InMemoryEventStore(),
     host: argv.host,
     port: argv.port,
-    sseEndpoint: argv.server && argv.server !== "sse" ? null : (argv.sseEndpoint ?? argv.endpoint),
-    streamEndpoint: argv.server && argv.server !== "stream" ? null : (argv.streamEndpoint ?? argv.endpoint),
+    sseEndpoint:
+      argv.server && argv.server !== "sse"
+        ? null
+        : (argv.sseEndpoint ?? argv.endpoint),
+    streamEndpoint:
+      argv.server && argv.server !== "stream"
+        ? null
+        : (argv.streamEndpoint ?? argv.endpoint),
   });
+
+  return {
+    close: () => {
+      return server.close();
+    },
+  };
 };
 
 const main = async () => {
-  process.on("SIGINT", () => {
-    console.info("SIGINT received, shutting down");
-
-    setTimeout(() => {
-      process.exit(0);
-    }, 100);
-  });
-
   try {
-    await proxy();
+    const server = await proxy();
+
+    process.on("SIGINT", () => {
+      console.info("SIGINT received, shutting down");
+
+      server.close();
+
+      setTimeout(() => {
+        process.exit(0);
+      }, 1000).unref();
+    });
   } catch (error) {
     console.error("could not start the proxy", error);
 
     setTimeout(() => {
       process.exit(1);
-    }, 100);
+    }, 1000);
   }
 };
 
