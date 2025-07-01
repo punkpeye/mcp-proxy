@@ -382,8 +382,8 @@ export const startHTTPServer = async <T extends ServerLike>({
   onConnect,
   onUnhandledRequest,
   port,
-  sseEndpoint,
-  streamEndpoint,
+  sseEndpoint = "/sse",
+  streamEndpoint = "/mcp",
 }: {
   createServer: (request: http.IncomingMessage) => Promise<T>;
   eventStore?: EventStore;
@@ -437,11 +437,11 @@ export const startHTTPServer = async <T extends ServerLike>({
     }
 
     if (
-      sseEndpoint !== null &&
+      sseEndpoint &&
       await handleSSERequest({
         activeTransports: activeSSETransports,
         createServer,
-        endpoint: sseEndpoint ?? "/sse",
+        endpoint: sseEndpoint,
         onClose,
         onConnect,
         req,
@@ -452,11 +452,11 @@ export const startHTTPServer = async <T extends ServerLike>({
     }
 
     if (
-      streamEndpoint !== null &&
+      streamEndpoint &&
       await handleStreamRequest({
         activeTransports: activeStreamTransports,
         createServer,
-        endpoint: streamEndpoint ?? "/mcp",
+        endpoint: streamEndpoint,
         eventStore,
         onClose,
         onConnect,
