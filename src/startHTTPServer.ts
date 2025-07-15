@@ -42,6 +42,7 @@ const getBody = (request: http.IncomingMessage) => {
 const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
   createServer,
+  enableJsonResponse,
   endpoint,
   eventStore,
   onClose,
@@ -54,6 +55,7 @@ const handleStreamRequest = async <T extends ServerLike>({
     { server: T; transport: StreamableHTTPServerTransport }
   >;
   createServer: (request: http.IncomingMessage) => Promise<T>;
+  enableJsonResponse?: boolean;
   endpoint: string;
   eventStore?: EventStore;
   onClose?: (server: T) => Promise<void>;
@@ -99,6 +101,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       } else if (!sessionId && isInitializeRequest(body)) {
         // Create a new transport for the session
         transport = new StreamableHTTPServerTransport({
+          enableJsonResponse,
           eventStore: eventStore || new InMemoryEventStore(),
           onsessioninitialized: (_sessionId) => {
             // add only when the id Sesison id is generated
@@ -394,6 +397,7 @@ const handleSSERequest = async <T extends ServerLike>({
 
 export const startHTTPServer = async <T extends ServerLike>({
   createServer,
+  enableJsonResponse,
   eventStore,
   host = "::",
   onClose,
@@ -404,6 +408,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   streamEndpoint = "/mcp",
 }: {
   createServer: (request: http.IncomingMessage) => Promise<T>;
+  enableJsonResponse?: boolean;
   eventStore?: EventStore;
   host?: string;
   onClose?: (server: T) => Promise<void>;
@@ -475,6 +480,7 @@ export const startHTTPServer = async <T extends ServerLike>({
       (await handleStreamRequest({
         activeTransports: activeStreamTransports,
         createServer,
+        enableJsonResponse,
         endpoint: streamEndpoint,
         eventStore,
         onClose,
