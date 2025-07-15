@@ -132,7 +132,20 @@ const handleStreamRequest = async <T extends ServerLike>({
           server = await createServer(req);
         } catch (error) {
           if (error instanceof Response) {
-            res.writeHead(error.status).end(error.statusText);
+            const fixedHeaders: http.OutgoingHttpHeaders = {};
+            error.headers.forEach((value, key) => {
+              // If a header appears multiple times, combine them as an array
+              if (fixedHeaders[key]) {
+                if (Array.isArray(fixedHeaders[key])) {
+                  (fixedHeaders[key] as string[]).push(value);
+                } else {
+                  fixedHeaders[key] = [fixedHeaders[key] as string, value];
+                }
+              } else {
+                fixedHeaders[key] = value;
+              }
+            });
+            res.writeHead(error.status, error.statusText, fixedHeaders).end(error.statusText);
 
             return true;
           }
