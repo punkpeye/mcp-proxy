@@ -42,6 +42,7 @@ const getBody = (request: http.IncomingMessage) => {
 const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
   createServer,
+  enableJsonResponse,
   endpoint,
   eventStore,
   onClose,
@@ -54,6 +55,7 @@ const handleStreamRequest = async <T extends ServerLike>({
     { server: T; transport: StreamableHTTPServerTransport }
   >;
   createServer: (request: http.IncomingMessage) => Promise<T>;
+  enableJsonResponse?: boolean;
   endpoint: string;
   eventStore?: EventStore;
   onClose?: (server: T) => Promise<void>;
@@ -99,6 +101,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       } else if (!sessionId && isInitializeRequest(body)) {
         // Create a new transport for the session
         transport = new StreamableHTTPServerTransport({
+          enableJsonResponse,
           eventStore: eventStore || new InMemoryEventStore(),
           onsessioninitialized: (_sessionId) => {
             // add only when the id Sesison id is generated
@@ -132,7 +135,20 @@ const handleStreamRequest = async <T extends ServerLike>({
           server = await createServer(req);
         } catch (error) {
           if (error instanceof Response) {
-            res.writeHead(error.status).end(error.statusText);
+            const fixedHeaders: http.OutgoingHttpHeaders = {};
+            error.headers.forEach((value, key) => {
+              // If a header appears multiple times, combine them as an array
+              if (fixedHeaders[key]) {
+                if (Array.isArray(fixedHeaders[key])) {
+                  (fixedHeaders[key] as string[]).push(value);
+                } else {
+                  fixedHeaders[key] = [fixedHeaders[key] as string, value];
+                }
+              } else {
+                fixedHeaders[key] = value;
+              }
+            });
+            res.writeHead(error.status, error.statusText, fixedHeaders).end(error.statusText);
 
             return true;
           }
@@ -381,6 +397,7 @@ const handleSSERequest = async <T extends ServerLike>({
 
 export const startHTTPServer = async <T extends ServerLike>({
   createServer,
+  enableJsonResponse,
   eventStore,
   host = "::",
   onClose,
@@ -391,6 +408,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   streamEndpoint = "/mcp",
 }: {
   createServer: (request: http.IncomingMessage) => Promise<T>;
+  enableJsonResponse?: boolean;
   eventStore?: EventStore;
   host?: string;
   onClose?: (server: T) => Promise<void>;
@@ -462,6 +480,7 @@ export const startHTTPServer = async <T extends ServerLike>({
       (await handleStreamRequest({
         activeTransports: activeStreamTransports,
         createServer,
+        enableJsonResponse,
         endpoint: streamEndpoint,
         eventStore,
         onClose,
