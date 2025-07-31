@@ -33,6 +33,7 @@ options:
 - `--endpoint`: If `server` is set to `sse` or `stream`, this option sets the endpoint path (default: `/sse` or `/mcp`)
 - `--sseEndpoint`: Set the SSE endpoint path (default: `/sse`). Overrides `--endpoint` if `server` is set to `sse`.
 - `--streamEndpoint`: Set the streamable HTTP endpoint path (default: `/mcp`). Overrides `--endpoint` if `server` is set to `stream`.
+- `--stateless`: Enable stateless mode for HTTP streamable transport (no session management). In this mode, each request creates a new server instance instead of maintaining persistent sessions.
 - `--port`: Specify the port to listen on (default: 8080)
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
@@ -50,6 +51,37 @@ npx mcp-proxy --port 8080 my-command -v
 # Correct: use -- to pass -v to my-command
 npx mcp-proxy --port 8080 -- my-command -v
 ```
+
+### Stateless Mode
+
+By default, MCP Proxy maintains persistent sessions for HTTP streamable transport, where each client connection is associated with a server instance that stays alive for the duration of the session. 
+
+Stateless mode (`--stateless`) changes this behavior:
+
+- **No session management**: Each request creates a new server instance instead of maintaining persistent sessions
+- **Simplified deployment**: Useful for serverless environments or when you want to minimize memory usage
+- **Request isolation**: Each request is completely independent, which can be beneficial for certain use cases
+
+Example usage:
+
+```bash
+# Enable stateless mode
+npx mcp-proxy --port 8080 --stateless tsx server.js
+
+# Stateless mode with stream-only transport
+npx mcp-proxy --port 8080 --stateless --server stream tsx server.js
+```
+
+> [!NOTE]
+> Stateless mode only affects HTTP streamable transport (`/mcp` endpoint). SSE transport behavior remains unchanged.
+
+**When to use stateless mode:**
+
+- **Serverless environments**: When deploying to platforms like AWS Lambda, Vercel, or similar
+- **Load balancing**: When requests need to be distributed across multiple instances
+- **Memory optimization**: When you want to minimize server memory usage
+- **Request isolation**: When you need complete independence between requests
+- **Simple deployments**: When you don't need to maintain connection state
 
 ### Node.js SDK
 
@@ -90,10 +122,24 @@ const { close } = await startHTTPServer({
   },
   eventStore: new InMemoryEventStore(),
   port: 8080,
+  stateless: false, // Optional: enable stateless mode for streamable HTTP transport
 });
 
 close();
 ```
+
+Options:
+
+- `createServer`: Function that creates a new server instance for each connection
+- `eventStore`: Event store for streamable HTTP transport (optional)
+- `port`: Port number to listen on
+- `host`: Host to bind to (default: "::")
+- `sseEndpoint`: SSE endpoint path (default: "/sse", set to null to disable)
+- `streamEndpoint`: Streamable HTTP endpoint path (default: "/mcp", set to null to disable)
+- `stateless`: Enable stateless mode for HTTP streamable transport (default: false)
+- `onConnect`: Callback when a server connects (optional)
+- `onClose`: Callback when a server disconnects (optional)
+- `onUnhandledRequest`: Callback for unhandled HTTP requests (optional)
 
 #### `startStdioServer`
 

@@ -39,6 +39,52 @@ const getBody = (request: http.IncomingMessage) => {
   });
 };
 
+// Helper function to create JSON RPC error responses
+const createJsonRpcErrorResponse = (code: number, message: string) => {
+  return JSON.stringify({
+    error: { code, message },
+    id: null,
+    jsonrpc: "2.0",
+  });
+};
+
+// Helper function to handle Response errors and send appropriate HTTP response
+const handleResponseError = (error: unknown, res: http.ServerResponse): boolean => {
+  if (error instanceof Response) {
+    const fixedHeaders: http.OutgoingHttpHeaders = {};
+    error.headers.forEach((value, key) => {
+      if (fixedHeaders[key]) {
+        if (Array.isArray(fixedHeaders[key])) {
+          (fixedHeaders[key] as string[]).push(value);
+        } else {
+          fixedHeaders[key] = [fixedHeaders[key] as string, value];
+        }
+      } else {
+        fixedHeaders[key] = value;
+      }
+    });
+    res.writeHead(error.status, error.statusText, fixedHeaders).end(error.statusText);
+    return true;
+  }
+  return false;
+};
+
+// Helper function to clean up server resources
+const cleanupServer = async <T extends ServerLike>(
+  server: T,
+  onClose?: (server: T) => Promise<void>
+) => {
+  if (onClose) {
+    await onClose(server);
+  }
+
+  try {
+    await server.close();
+  } catch (error) {
+    console.error("[mcp-proxy] error closing server", error);
+  }
+};
+
 const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
   createServer,
@@ -49,6 +95,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   onConnect,
   req,
   res,
+  stateless,
 }: {
   activeTransports: Record<
     string,
@@ -62,6 +109,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   onConnect?: (server: T) => Promise<void>;
   req: http.IncomingMessage;
   res: http.ServerResponse;
+  stateless?: boolean;
 }) => {
   if (
     req.method === "POST" &&
@@ -83,14 +131,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         if (!activeTransport) {
           res.setHeader("Content-Type", "application/json");
           res.writeHead(404).end(
-            JSON.stringify({
-              error: {
-                code: -32001,
-                message: "Session not found",
-              },
-              id: null,
-              jsonrpc: "2.0",
-            }),
+            createJsonRpcErrorResponse(-32001, "Session not found"),
           );
 
           return true;
@@ -104,52 +145,65 @@ const handleStreamRequest = async <T extends ServerLike>({
           enableJsonResponse,
           eventStore: eventStore || new InMemoryEventStore(),
           onsessioninitialized: (_sessionId) => {
-            // add only when the id Sesison id is generated
-            activeTransports[_sessionId] = {
-              server,
-              transport,
-            };
+            // add only when the id Session id is generated (skip in stateless mode)
+            if (!stateless && _sessionId) {
+              activeTransports[_sessionId] = {
+                server,
+                transport,
+              };
+            }
           },
-          sessionIdGenerator: randomUUID,
+          sessionIdGenerator: stateless ? undefined : randomUUID,
         });
 
         // Handle the server close event
         transport.onclose = async () => {
           const sid = transport.sessionId;
-          if (sid && activeTransports[sid]) {
-            if (onClose) {
-              await onClose(server);
-            }
-
-            try {
-              await server.close();
-            } catch (error) {
-              console.error("[mcp-proxy] error closing server", error);
-            }
-
+          if (!stateless && sid && activeTransports[sid]) {
+            await cleanupServer(server, onClose);
             delete activeTransports[sid];
+          } else if (stateless) {
+            // In stateless mode, always call onClose when transport closes
+            await cleanupServer(server, onClose);
           }
         };
 
         try {
           server = await createServer(req);
         } catch (error) {
-          if (error instanceof Response) {
-            const fixedHeaders: http.OutgoingHttpHeaders = {};
-            error.headers.forEach((value, key) => {
-              // If a header appears multiple times, combine them as an array
-              if (fixedHeaders[key]) {
-                if (Array.isArray(fixedHeaders[key])) {
-                  (fixedHeaders[key] as string[]).push(value);
-                } else {
-                  fixedHeaders[key] = [fixedHeaders[key] as string, value];
-                }
-              } else {
-                fixedHeaders[key] = value;
-              }
-            });
-            res.writeHead(error.status, error.statusText, fixedHeaders).end(error.statusText);
+          if (handleResponseError(error, res)) {
+            return true;
+          }
 
+          res.writeHead(500).end("Error creating server");
+
+          return true;
+        }
+
+        server.connect(transport);
+
+        if (onConnect) {
+          await onConnect(server);
+        }
+
+        await transport.handleRequest(req, res, body);
+
+        return true;
+      } else if (stateless && !sessionId && !isInitializeRequest(body)) {
+        // In stateless mode, handle non-initialize requests by creating a new transport
+        transport = new StreamableHTTPServerTransport({
+          enableJsonResponse,
+          eventStore: eventStore || new InMemoryEventStore(),
+          onsessioninitialized: () => {
+            // No session tracking in stateless mode
+          },
+          sessionIdGenerator: undefined,
+        });
+
+        try {
+          server = await createServer(req);
+        } catch (error) {
+          if (handleResponseError(error, res)) {
             return true;
           }
 
@@ -172,14 +226,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         res.setHeader("Content-Type", "application/json");
 
         res.writeHead(400).end(
-          JSON.stringify({
-            error: {
-              code: -32000,
-              message: "Bad Request: No valid session ID provided",
-            },
-            id: null,
-            jsonrpc: "2.0",
-          }),
+          createJsonRpcErrorResponse(-32000, "Bad Request: No valid session ID provided"),
         );
 
         return true;
@@ -195,11 +242,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       res.setHeader("Content-Type", "application/json");
 
       res.writeHead(500).end(
-        JSON.stringify({
-          error: { code: -32603, message: "Internal Server Error" },
-          id: null,
-          jsonrpc: "2.0",
-        }),
+        createJsonRpcErrorResponse(-32603, "Internal Server Error"),
       );
     }
     return true;
@@ -272,9 +315,7 @@ const handleStreamRequest = async <T extends ServerLike>({
     try {
       await activeTransport.transport.handleRequest(req, res);
 
-      if (onClose) {
-        await onClose(activeTransport.server);
-      }
+      await cleanupServer(activeTransport.server, onClose);
     } catch (error) {
       console.error("[mcp-proxy] error handling delete request", error);
 
@@ -315,9 +356,7 @@ const handleSSERequest = async <T extends ServerLike>({
     try {
       server = await createServer(req);
     } catch (error) {
-      if (error instanceof Response) {
-        res.writeHead(error.status).end(error.statusText);
-
+      if (handleResponseError(error, res)) {
         return true;
       }
 
@@ -333,15 +372,9 @@ const handleSSERequest = async <T extends ServerLike>({
     res.on("close", async () => {
       closed = true;
 
-      try {
-        await server.close();
-      } catch (error) {
-        console.error("[mcp-proxy] error closing server", error);
-      }
+      await cleanupServer(server, onClose);
 
       delete activeTransports[transport.sessionId];
-
-      await onClose?.(server);
     });
 
     try {
@@ -405,6 +438,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   onUnhandledRequest,
   port,
   sseEndpoint = "/sse",
+  stateless,
   streamEndpoint = "/mcp",
 }: {
   createServer: (request: http.IncomingMessage) => Promise<T>;
@@ -419,6 +453,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   ) => Promise<void>;
   port: number;
   sseEndpoint?: null | string;
+  stateless?: boolean;
   streamEndpoint?: null | string;
 }): Promise<SSEServer> => {
   const activeSSETransports: Record<string, SSEServerTransport> = {};
@@ -487,6 +522,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         onConnect,
         req,
         res,
+        stateless,
       }))
     ) {
       return;

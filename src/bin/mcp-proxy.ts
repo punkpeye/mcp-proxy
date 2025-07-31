@@ -78,6 +78,11 @@ const argv = await yargs(hideBin(process.argv))
       describe: "The SSE endpoint to listen on",
       type: "string",
     },
+    stateless: {
+      default: false,
+      describe: "Enable stateless mode for HTTP streamable transport (no session management)",
+      type: "boolean",
+    },
     streamEndpoint: {
       default: "/mcp",
       describe: "The stream endpoint to listen on",
@@ -160,6 +165,7 @@ const proxy = async () => {
       argv.server && argv.server !== "sse"
         ? null
         : (argv.sseEndpoint ?? argv.endpoint),
+    stateless: argv.stateless,
     streamEndpoint:
       argv.server && argv.server !== "stream"
         ? null

@@ -238,3 +238,92 @@ it("proxies messages between SSE and stdio servers", async () => {
 
   expect(onClose).toHaveBeenCalled();
 });
+
+it("supports stateless HTTP streamable transport", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+
+  const onConnect = vi.fn().mockResolvedValue(undefined);
+  const onClose = vi.fn().mockResolvedValue(undefined);
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+
+      return mcpServer;
+    },
+    onClose,
+    onConnect,
+    port,
+    stateless: true, // Enable stateless mode
+  });
+
+  // Create a stateless streamable HTTP client
+  const streamTransport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/mcp`),
+  );
+
+  const streamClient = new Client(
+    {
+      name: "stream-client-stateless",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await streamClient.connect(streamTransport);
+
+  // Test that we can still make requests in stateless mode
+  const result = await streamClient.listResources();
+  expect(result).toEqual({
+    resources: [
+      {
+        name: "Example Resource",
+        uri: "file:///example.txt",
+      },
+    ],
+  });
+
+  await streamClient.close();
+  await httpServer.close();
+  await stdioClient.close();
+
+  expect(onConnect).toHaveBeenCalled();
+  // Note: in stateless mode, onClose behavior may differ since there's no persistent session
+  await delay(100);
+});
