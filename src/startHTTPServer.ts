@@ -157,8 +157,17 @@ const handleStreamRequest = async <T extends ServerLike>({
         });
 
         // Handle the server close event
+        let isCleaningUp = false;
+
         transport.onclose = async () => {
           const sid = transport.sessionId;
+          
+          if (isCleaningUp) {
+            return;
+          }
+          
+          isCleaningUp = true;
+          
           if (!stateless && sid && activeTransports[sid]) {
             await cleanupServer(server, onClose);
             delete activeTransports[sid];
@@ -368,10 +377,17 @@ const handleSSERequest = async <T extends ServerLike>({
     activeTransports[transport.sessionId] = transport;
 
     let closed = false;
+    let isCleaningUp = false;
 
     res.on("close", async () => {
       closed = true;
 
+      // Prevent recursive cleanup
+      if (isCleaningUp) {
+        return;
+      }
+      
+      isCleaningUp = true;
       await cleanupServer(server, onClose);
 
       delete activeTransports[transport.sessionId];
