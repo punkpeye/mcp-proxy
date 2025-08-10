@@ -1,5 +1,5 @@
 /**
- * Forked from https://github.com/modelcontextprotocol/typescript-sdk/blob/66e1508162d37c0b83b0637ebcd7f07946e3d210/src/client/stdio.ts#L90
+ * Forked from https://github.com/modelcontextprotocol/typescript-sdk/blob/a1608a6513d18eb965266286904760f830de96fe/src/client/stdio.ts
  */
 
 import {
@@ -9,7 +9,7 @@ import {
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { ChildProcess, IOType, spawn } from "node:child_process";
-import { Stream } from "node:stream";
+import { PassThrough, Stream } from "node:stream";
 
 import { JSONFilterTransform } from "./JSONFilterTransform.js";
 
@@ -84,23 +84,40 @@ export class StdioClientTransport implements Transport {
   onerror?: (error: Error) => void;
   onmessage?: (message: JSONRPCMessage) => void;
   /**
+   * The child process pid spawned by this transport.
+   *
+   * This is only available after the transport has been started.
+   */
+  get pid(): null | number {
+    return this._process?.pid ?? null;
+  }
+  /**
    * The stderr stream of the child process, if `StdioServerParameters.stderr` was set to "pipe" or "overlapped".
    *
-   * This is only available after the process has been started.
+   * If stderr piping was requested, a PassThrough stream is returned _immediately_, allowing callers to
+   * attach listeners before the start method is invoked. This prevents loss of any early
+   * error output emitted by the child process.
    */
   get stderr(): null | Stream {
-    return this.process?.stderr ?? null;
+    if (this._stderrStream) {
+      return this._stderrStream;
+    }
+
+    return this._process?.stderr ?? null;
   }
-  private abortController: AbortController = new AbortController();
+  private _abortController: AbortController = new AbortController();
+  private _process?: ChildProcess;
+  private _readBuffer: ReadBuffer = new ReadBuffer();
+  private _serverParams: StdioServerParameters;
+  private _stderrStream: null | PassThrough = null;
 
   private onEvent?: (event: TransportEvent) => void;
-  private process?: ChildProcess;
-  private readBuffer: ReadBuffer = new ReadBuffer();
-
-  private serverParams: StdioServerParameters;
 
   constructor(server: StdioServerParameters) {
-    this.serverParams = server;
+    this._serverParams = server;
+    if (server.stderr === "pipe" || server.stderr === "overlapped") {
+      this._stderrStream = new PassThrough();
+    }
     this.onEvent = server.onEvent;
   }
 
@@ -109,22 +126,22 @@ export class StdioClientTransport implements Transport {
       type: "close",
     });
 
-    this.abortController.abort();
-    this.process = undefined;
-    this.readBuffer.clear();
+    this._abortController.abort();
+    this._process = undefined;
+    this._readBuffer.clear();
   }
 
   send(message: JSONRPCMessage): Promise<void> {
     return new Promise((resolve) => {
-      if (!this.process?.stdin) {
+      if (!this._process?.stdin) {
         throw new Error("Not connected");
       }
 
       const json = serializeMessage(message);
-      if (this.process.stdin.write(json)) {
+      if (this._process.stdin.write(json)) {
         resolve();
       } else {
-        this.process.stdin.once("drain", resolve);
+        this._process.stdin.once("drain", resolve);
       }
     });
   }
@@ -133,27 +150,28 @@ export class StdioClientTransport implements Transport {
    * Starts the server process and prepares to communicate with it.
    */
   async start(): Promise<void> {
-    if (this.process) {
+    if (this._process) {
       throw new Error(
         "StdioClientTransport already started! If using Client class, note that connect() calls start() automatically.",
       );
     }
 
     return new Promise((resolve, reject) => {
-      this.process = spawn(
-        this.serverParams.command,
-        this.serverParams.args ?? [],
+      this._process = spawn(
+        this._serverParams.command,
+        this._serverParams.args ?? [],
         {
-          cwd: this.serverParams.cwd,
-          env: this.serverParams.env,
-          shell: this.serverParams.shell ?? false,
-          signal: this.abortController.signal,
-          stdio: ["pipe", "pipe", this.serverParams.stderr ?? "inherit"],
+          cwd: this._serverParams.cwd,
+          env: this._serverParams.env,
+          shell: this._serverParams.shell ?? false,
+          signal: this._abortController.signal,
+          stdio: ["pipe", "pipe", this._serverParams.stderr ?? "inherit"],
         },
       );
 
-      this.process.on("error", (error) => {
+      this._process.on("error", (error) => {
         if (error.name === "AbortError") {
+          // Expected when close() is called.
           this.onclose?.();
           return;
         }
@@ -162,21 +180,21 @@ export class StdioClientTransport implements Transport {
         this.onerror?.(error);
       });
 
-      this.process.on("spawn", () => {
+      this._process.on("spawn", () => {
         resolve();
       });
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      this.process.on("close", (_code) => {
+      this._process.on("close", (_code) => {
         this.onEvent?.({
           type: "close",
         });
 
-        this.process = undefined;
+        this._process = undefined;
         this.onclose?.();
       });
 
-      this.process.stdin?.on("error", (error) => {
+      this._process.stdin?.on("error", (error) => {
         this.onEvent?.({
           error,
           type: "error",
@@ -187,7 +205,7 @@ export class StdioClientTransport implements Transport {
 
       const jsonFilterTransform = new JSONFilterTransform();
 
-      this.process.stdout?.pipe(jsonFilterTransform);
+      this._process.stdout?.pipe(jsonFilterTransform);
 
       jsonFilterTransform.on("data", (chunk) => {
         this.onEvent?.({
@@ -195,7 +213,7 @@ export class StdioClientTransport implements Transport {
           type: "data",
         });
 
-        this.readBuffer.append(chunk);
+        this._readBuffer.append(chunk);
         this.processReadBuffer();
       });
 
@@ -207,13 +225,17 @@ export class StdioClientTransport implements Transport {
 
         this.onerror?.(error);
       });
+
+      if (this._stderrStream && this._process.stderr) {
+        this._process.stderr.pipe(this._stderrStream);
+      }
     });
   }
 
   private processReadBuffer() {
     while (true) {
       try {
-        const message = this.readBuffer.readMessage();
+        const message = this._readBuffer.readMessage();
 
         if (message === null) {
           break;
