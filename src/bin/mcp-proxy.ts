@@ -197,8 +197,8 @@ const createGracefulShutdown = ({
     }, timeout).unref();
   };
 
-  process.on("SIGTERM", gracefulShutdown);
-  process.on("SIGINT", gracefulShutdown);
+  process.once("SIGTERM", gracefulShutdown);
+  process.once("SIGINT", gracefulShutdown);
 
   return () => {
     server.close();
