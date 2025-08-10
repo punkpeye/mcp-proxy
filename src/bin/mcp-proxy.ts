@@ -80,7 +80,8 @@ const argv = await yargs(hideBin(process.argv))
     },
     stateless: {
       default: false,
-      describe: "Enable stateless mode for HTTP streamable transport (no session management)",
+      describe:
+        "Enable stateless mode for HTTP streamable transport (no session management)",
       type: "boolean",
     },
     streamEndpoint: {
@@ -98,6 +99,7 @@ if (!argv.command) {
 }
 
 const finalCommand = argv.command;
+
 // If -- separator was used, args after -- are in argv["--"], otherwise use parsed args
 const finalArgs = (argv["--"] as string[]) || argv.args;
 
@@ -112,7 +114,8 @@ const connect = async (client: Client) => {
       }
     },
     shell: argv.shell,
-    stderr: "pipe",
+    // We want to passthrough stderr from the MCP server to enable better debugging
+    stderr: "inherit",
   });
 
   await client.connect(transport);
@@ -216,6 +219,7 @@ const main = async () => {
   } catch (error) {
     console.error("could not start the proxy", error);
 
+    // We give an extra second for logs to flush
     setTimeout(() => {
       process.exit(1);
     }, 1000);
