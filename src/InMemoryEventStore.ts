@@ -1,6 +1,6 @@
 /**
  * This is a copy of the InMemoryEventStore from the typescript-sdk
- * https://github.com/modelcontextprotocol/typescript-sdk/blob/main/src/inMemoryEventStore.ts
+ * https://github.com/modelcontextprotocol/typescript-sdk/blob/main/src/examples/shared/inMemoryEventStore.ts
  */
 
 import type { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
