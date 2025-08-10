@@ -49,7 +49,10 @@ const createJsonRpcErrorResponse = (code: number, message: string) => {
 };
 
 // Helper function to handle Response errors and send appropriate HTTP response
-const handleResponseError = (error: unknown, res: http.ServerResponse): boolean => {
+const handleResponseError = (
+  error: unknown,
+  res: http.ServerResponse,
+): boolean => {
   if (error instanceof Response) {
     const fixedHeaders: http.OutgoingHttpHeaders = {};
     error.headers.forEach((value, key) => {
@@ -63,7 +66,9 @@ const handleResponseError = (error: unknown, res: http.ServerResponse): boolean 
         fixedHeaders[key] = value;
       }
     });
-    res.writeHead(error.status, error.statusText, fixedHeaders).end(error.statusText);
+    res
+      .writeHead(error.status, error.statusText, fixedHeaders)
+      .end(error.statusText);
     return true;
   }
   return false;
@@ -72,7 +77,7 @@ const handleResponseError = (error: unknown, res: http.ServerResponse): boolean 
 // Helper function to clean up server resources
 const cleanupServer = async <T extends ServerLike>(
   server: T,
-  onClose?: (server: T) => Promise<void>
+  onClose?: (server: T) => Promise<void>,
 ) => {
   if (onClose) {
     await onClose(server);
@@ -130,9 +135,9 @@ const handleStreamRequest = async <T extends ServerLike>({
         const activeTransport = activeTransports[sessionId];
         if (!activeTransport) {
           res.setHeader("Content-Type", "application/json");
-          res.writeHead(404).end(
-            createJsonRpcErrorResponse(-32001, "Session not found"),
-          );
+          res
+            .writeHead(404)
+            .end(createJsonRpcErrorResponse(-32001, "Session not found"));
 
           return true;
         }
@@ -161,13 +166,13 @@ const handleStreamRequest = async <T extends ServerLike>({
 
         transport.onclose = async () => {
           const sid = transport.sessionId;
-          
+
           if (isCleaningUp) {
             return;
           }
-          
+
           isCleaningUp = true;
-          
+
           if (!stateless && sid && activeTransports[sid]) {
             await cleanupServer(server, onClose);
             delete activeTransports[sid];
@@ -234,9 +239,14 @@ const handleStreamRequest = async <T extends ServerLike>({
         // Error if the server is not created but the request is not an initialize request
         res.setHeader("Content-Type", "application/json");
 
-        res.writeHead(400).end(
-          createJsonRpcErrorResponse(-32000, "Bad Request: No valid session ID provided"),
-        );
+        res
+          .writeHead(400)
+          .end(
+            createJsonRpcErrorResponse(
+              -32000,
+              "Bad Request: No valid session ID provided",
+            ),
+          );
 
         return true;
       }
@@ -250,9 +260,9 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       res.setHeader("Content-Type", "application/json");
 
-      res.writeHead(500).end(
-        createJsonRpcErrorResponse(-32603, "Internal Server Error"),
-      );
+      res
+        .writeHead(500)
+        .end(createJsonRpcErrorResponse(-32603, "Internal Server Error"));
     }
     return true;
   }
@@ -386,7 +396,7 @@ const handleSSERequest = async <T extends ServerLike>({
       if (isCleaningUp) {
         return;
       }
-      
+
       isCleaningUp = true;
       await cleanupServer(server, onClose);
 
