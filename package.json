@@ -22,7 +22,7 @@
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.2",
+    "@modelcontextprotocol/sdk": "^1.17.3",
     "eventsource": "^4.0.0",
     "yargs": "^18.0.0"
   },
@@ -47,7 +47,7 @@
     "@sebbo2002/semantic-release-jsr": "^3.0.1",
     "@tsconfig/node22": "^22.0.2",
     "@types/express": "^5.0.3",
-    "@types/node": "^24.2.1",
+    "@types/node": "^24.3.0",
     "@types/yargs": "^17.0.33",
     "eslint": "^9.33.0",
     "eslint-config-prettier": "^10.1.8",
@@ -59,9 +59,9 @@
     "prettier": "^3.6.2",
     "semantic-release": "^24.2.7",
     "tsup": "^8.5.0",
-    "tsx": "^4.20.3",
+    "tsx": "^4.20.4",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.39.0",
+    "typescript-eslint": "^8.39.1",
     "vitest": "^3.2.4"
   },
   "tsup": {
