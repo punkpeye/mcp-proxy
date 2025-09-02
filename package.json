@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsup",
+    "build": "tsdown",
     "test": "vitest run && tsc && eslint . && jsr publish --dry-run --allow-dirty",
     "format": "eslint --fix ."
   },
@@ -21,11 +21,6 @@
   "description": "A TypeScript SSE proxy for MCP servers that use stdio transport.",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.3",
-    "eventsource": "^4.0.0",
-    "yargs": "^18.0.0"
-  },
   "repository": {
     "url": "https://github.com/punkpeye/mcp-proxy"
   },
@@ -44,6 +39,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
+    "@modelcontextprotocol/sdk": "^1.17.3",
     "@sebbo2002/semantic-release-jsr": "^3.0.1",
     "@tsconfig/node22": "^22.0.2",
     "@types/express": "^5.0.3",
@@ -52,19 +48,21 @@
     "eslint": "^9.33.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-perfectionist": "^4.15.0",
+    "eventsource": "^4.0.0",
     "express": "^5.0.1",
     "get-port-please": "^3.2.0",
     "jiti": "^2.5.1",
     "jsr": "^0.13.5",
     "prettier": "^3.6.2",
     "semantic-release": "^24.2.7",
-    "tsup": "^8.5.0",
+    "tsdown": "^0.14.2",
     "tsx": "^4.20.4",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.39.1",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "yargs": "^18.0.0"
   },
-  "tsup": {
+  "tsdown": {
     "entry": [
       "src/index.ts",
       "src/bin/mcp-proxy.ts"
