@@ -37,6 +37,7 @@ options:
 - `--port`: Specify the port to listen on (default: 8080)
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
+- `--apiKey`: API key for authenticating requests (uses X-API-Key header)
 
 ### Passing arguments to the wrapped command
 
@@ -82,6 +83,64 @@ npx mcp-proxy --port 8080 --stateless --server stream tsx server.js
 - **Memory optimization**: When you want to minimize server memory usage
 - **Request isolation**: When you need complete independence between requests
 - **Simple deployments**: When you don't need to maintain connection state
+
+### API Key Authentication
+
+MCP Proxy supports optional API key authentication to secure your endpoints. When enabled, clients must provide a valid API key in the `X-API-Key` header to access the proxy.
+
+#### Enabling Authentication
+
+Authentication is disabled by default for backward compatibility. To enable it, provide an API key via:
+
+**Command-line:**
+```bash
+npx mcp-proxy --port 8080 --apiKey "your-secret-key" tsx server.js
+```
+
+**Environment variable:**
+```bash
+export MCP_PROXY_API_KEY="your-secret-key"
+npx mcp-proxy --port 8080 tsx server.js
+```
+
+#### Client Configuration
+
+Clients must include the API key in the `X-API-Key` header:
+
+```typescript
+// For streamable HTTP transport
+const transport = new StreamableHTTPClientTransport(
+  new URL('http://localhost:8080/mcp'),
+  {
+    headers: {
+      'X-API-Key': 'your-secret-key'
+    }
+  }
+);
+
+// For SSE transport
+const transport = new SSEClientTransport(
+  new URL('http://localhost:8080/sse'),
+  {
+    headers: {
+      'X-API-Key': 'your-secret-key'
+    }
+  }
+);
+```
+
+#### Exempt Endpoints
+
+The following endpoints do not require authentication:
+- `/ping` - Health check endpoint
+- `OPTIONS` requests - CORS preflight requests
+
+#### Security Notes
+
+- **Use HTTPS in production**: API keys should only be transmitted over secure connections
+- **Keep keys secure**: Never commit API keys to version control
+- **Generate strong keys**: Use cryptographically secure random strings for API keys
+- **Rotate keys regularly**: Change API keys periodically for better security
 
 ### Node.js SDK
 
@@ -137,6 +196,7 @@ Options:
 - `sseEndpoint`: SSE endpoint path (default: "/sse", set to null to disable)
 - `streamEndpoint`: Streamable HTTP endpoint path (default: "/mcp", set to null to disable)
 - `stateless`: Enable stateless mode for HTTP streamable transport (default: false)
+- `apiKey`: API key for authenticating requests (optional)
 - `onConnect`: Callback when a server connects (optional)
 - `onClose`: Callback when a server disconnects (optional)
 - `onUnhandledRequest`: Callback for unhandled HTTP requests (optional)

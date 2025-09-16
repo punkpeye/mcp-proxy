@@ -38,6 +38,10 @@ const argv = await yargs(hideBin(process.argv))
     "populate--": true,
   })
   .options({
+    apiKey: {
+      describe: "API key for authenticating requests (uses X-API-Key header)",
+      type: "string",
+    },
     debug: {
       default: false,
       describe: "Enable debug logging",
@@ -160,6 +164,7 @@ const proxy = async () => {
   };
 
   const server = await startHTTPServer({
+    apiKey: argv.apiKey,
     createServer,
     eventStore: new InMemoryEventStore(),
     host: argv.host,

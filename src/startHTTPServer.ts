@@ -8,6 +8,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import http from "http";
 import { randomUUID } from "node:crypto";
 
+import { AuthenticationMiddleware } from "./authentication.js";
 import { InMemoryEventStore } from "./InMemoryEventStore.js";
 
 export type SSEServer = {
@@ -455,6 +456,7 @@ const handleSSERequest = async <T extends ServerLike>({
 };
 
 export const startHTTPServer = async <T extends ServerLike>({
+  apiKey,
   createServer,
   enableJsonResponse,
   eventStore,
@@ -467,6 +469,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   stateless,
   streamEndpoint = "/mcp",
 }: {
+  apiKey?: string;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
   eventStore?: EventStore;
@@ -491,6 +494,8 @@ export const startHTTPServer = async <T extends ServerLike>({
       transport: StreamableHTTPServerTransport;
     }
   > = {};
+
+  const authMiddleware = new AuthenticationMiddleware({ apiKey });
 
   /**
    * @author https://dev.classmethod.jp/articles/mcp-sse/
@@ -518,6 +523,14 @@ export const startHTTPServer = async <T extends ServerLike>({
 
     if (req.method === "GET" && req.url === `/ping`) {
       res.writeHead(200).end("pong");
+      return;
+    }
+
+    // Check authentication for all other endpoints
+    if (!authMiddleware.validateRequest(req)) {
+      const authResponse = authMiddleware.getUnauthorizedResponse();
+      res.writeHead(401, authResponse.headers);
+      res.end(authResponse.body);
       return;
     }
 

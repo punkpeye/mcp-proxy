@@ -327,3 +327,377 @@ it("supports stateless HTTP streamable transport", async () => {
   // Note: in stateless mode, onClose behavior may differ since there's no persistent session
   await delay(100);
 });
+
+it("allows requests when no auth is configured", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    // No apiKey configured
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+
+      return mcpServer;
+    },
+    port,
+  });
+
+  const streamClient = new Client(
+    {
+      name: "stream-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  // Connect without any authentication header
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/mcp`),
+  );
+
+  await streamClient.connect(transport);
+
+  // Should be able to make requests without auth
+  const result = await streamClient.listResources();
+  expect(result).toEqual({
+    resources: [
+      {
+        name: "Example Resource",
+        uri: "file:///example.txt",
+      },
+    ],
+  });
+
+  await streamClient.close();
+  await httpServer.close();
+  await stdioClient.close();
+});
+
+it("rejects requests without API key when auth is enabled", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    apiKey: "test-api-key-123", // API key configured
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Try to connect without authentication header
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/mcp`),
+  );
+
+  const streamClient = new Client(
+    {
+      name: "stream-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  // Connection should fail due to missing auth
+  await expect(streamClient.connect(transport)).rejects.toThrow();
+
+  await httpServer.close();
+  await stdioClient.close();
+});
+
+it("accepts requests with valid API key", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+  const apiKey = "test-api-key-123";
+
+  const httpServer = await startHTTPServer({
+    apiKey,
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Connect with proper authentication header
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/mcp`),
+    {
+      requestInit: {
+        headers: {
+          "X-API-Key": apiKey,
+        },
+      },
+    },
+  );
+
+  const streamClient = new Client(
+    {
+      name: "stream-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await streamClient.connect(transport);
+
+  // Should be able to make requests with valid auth
+  const result = await streamClient.listResources();
+  expect(result).toEqual({
+    resources: [
+      {
+        name: "Example Resource",
+        uri: "file:///example.txt",
+      },
+    ],
+  });
+
+  await streamClient.close();
+  await httpServer.close();
+  await stdioClient.close();
+});
+
+it("works with SSE transport and authentication", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+  const apiKey = "test-api-key-456";
+
+  const httpServer = await startHTTPServer({
+    apiKey,
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Connect with proper authentication header for SSE
+  const transport = new SSEClientTransport(
+    new URL(`http://localhost:${port}/sse`),
+    {
+      requestInit: {
+        headers: {
+          "X-API-Key": apiKey,
+        },
+      },
+    },
+  );
+
+  const sseClient = new Client(
+    {
+      name: "sse-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await sseClient.connect(transport);
+
+  // Should be able to make requests with valid auth
+  const result = await sseClient.listResources();
+  expect(result).toEqual({
+    resources: [
+      {
+        name: "Example Resource",
+        uri: "file:///example.txt",
+      },
+    ],
+  });
+
+  await sseClient.close();
+  await httpServer.close();
+  await stdioClient.close();
+});
+
+it("does not require auth for /ping endpoint", async () => {
+  const port = await getRandomPort();
+  const apiKey = "test-api-key-789";
+
+  const httpServer = await startHTTPServer({
+    apiKey,
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Test /ping without auth header
+  const response = await fetch(`http://localhost:${port}/ping`);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toBe("pong");
+
+  await httpServer.close();
+});
+
+it("does not require auth for OPTIONS requests", async () => {
+  const port = await getRandomPort();
+  const apiKey = "test-api-key-999";
+
+  const httpServer = await startHTTPServer({
+    apiKey,
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Test OPTIONS without auth header
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    method: "OPTIONS",
+  });
+  expect(response.status).toBe(204);
+
+  await httpServer.close();
+});
