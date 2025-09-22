@@ -66,6 +66,11 @@ const argv = await yargs(hideBin(process.argv))
       describe: "The port to listen on",
       type: "number",
     },
+    requestTimeout: {
+      default: 300000,
+      describe: "The timeout (in milliseconds) for requests to the MCP server (default: 5 minutes)",
+      type: "number",
+    },
     server: {
       choices: ["sse", "stream"],
       describe:
@@ -156,6 +161,7 @@ const proxy = async () => {
 
     proxyServer({
       client,
+      requestTimeout: argv.requestTimeout,
       server,
       serverCapabilities,
     });
