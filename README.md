@@ -35,6 +35,7 @@ options:
 - `--streamEndpoint`: Set the streamable HTTP endpoint path (default: `/mcp`). Overrides `--endpoint` if `server` is set to `stream`.
 - `--stateless`: Enable stateless mode for HTTP streamable transport (no session management). In this mode, each request creates a new server instance instead of maintaining persistent sessions.
 - `--port`: Specify the port to listen on (default: 8080)
+- `--requestTimeout`: Timeout in milliseconds for requests to the MCP server (default: 300000, which is 5 minutes)
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
 - `--apiKey`: API key for authenticating requests (uses X-API-Key header)
