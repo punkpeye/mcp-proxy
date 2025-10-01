@@ -93,6 +93,7 @@ const cleanupServer = async <T extends ServerLike>(
 
 const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
+  authenticate,
   createServer,
   enableJsonResponse,
   endpoint,
@@ -107,6 +108,7 @@ const handleStreamRequest = async <T extends ServerLike>({
     string,
     { server: T; transport: StreamableHTTPServerTransport }
   >;
+  authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
   endpoint: string;
@@ -131,6 +133,41 @@ const handleStreamRequest = async <T extends ServerLike>({
       let server: T;
 
       const body = await getBody(req);
+
+      // Per-request authentication in stateless mode
+      if (stateless && authenticate) {
+        try {
+          const authResult = await authenticate(req);
+          if (!authResult) {
+            res.setHeader("Content-Type", "application/json");
+            res.writeHead(401).end(
+              JSON.stringify({
+                error: {
+                  code: -32000,
+                  message: "Unauthorized: Authentication failed"
+                },
+                id: (body as { id?: unknown })?.id ?? null,
+                jsonrpc: "2.0"
+              })
+            );
+            return true;
+          }
+        } catch (error) {
+          console.error("Authentication error:", error);
+          res.setHeader("Content-Type", "application/json");
+          res.writeHead(401).end(
+            JSON.stringify({
+              error: {
+                code: -32000,
+                message: "Unauthorized: Authentication error"
+              },
+              id: (body as { id?: unknown })?.id ?? null,
+              jsonrpc: "2.0"
+            })
+          );
+          return true;
+        }
+      }
 
       if (sessionId) {
         const activeTransport = activeTransports[sessionId];
@@ -457,6 +494,7 @@ const handleSSERequest = async <T extends ServerLike>({
 
 export const startHTTPServer = async <T extends ServerLike>({
   apiKey,
+  authenticate,
   createServer,
   enableJsonResponse,
   eventStore,
@@ -470,6 +508,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   streamEndpoint = "/mcp",
 }: {
   apiKey?: string;
+  authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
   eventStore?: EventStore;
@@ -508,8 +547,8 @@ export const startHTTPServer = async <T extends ServerLike>({
         res.setHeader("Access-Control-Allow-Origin", origin.origin);
         res.setHeader("Access-Control-Allow-Credentials", "true");
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "*");
-        res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id");
+        res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
       } catch (error) {
         console.error("[mcp-proxy] error parsing origin", error);
       }
@@ -553,6 +592,7 @@ export const startHTTPServer = async <T extends ServerLike>({
       streamEndpoint &&
       (await handleStreamRequest({
         activeTransports: activeStreamTransports,
+        authenticate,
         createServer,
         enableJsonResponse,
         endpoint: streamEndpoint,
