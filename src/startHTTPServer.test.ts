@@ -1181,3 +1181,497 @@ it("includes Authorization in CORS allowed headers", async () => {
 
   await httpServer.close();
 });
+
+// Tests for FastMCP-style authentication with { authenticated: false } pattern
+
+it("returns 401 when authenticate callback returns { authenticated: false } in stateless mode", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+
+  // Mock authenticate callback that returns { authenticated: false }
+  const authenticate = vi.fn().mockResolvedValue({
+    authenticated: false,
+    error: "Invalid JWT token",
+  });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+
+      return mcpServer;
+    },
+    port,
+    stateless: true,
+  });
+
+  // Create client with invalid Bearer token
+  const streamTransport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/mcp`),
+    {
+      requestInit: {
+        headers: {
+          Authorization: "Bearer invalid-jwt-token",
+        },
+      },
+    },
+  );
+
+  const streamClient = new Client(
+    {
+      name: "stream-client-auth-false",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  // Connection should fail due to authentication returning false
+  await expect(streamClient.connect(streamTransport)).rejects.toThrow();
+
+  // Verify authenticate callback was called
+  expect(authenticate).toHaveBeenCalled();
+
+  await httpServer.close();
+  await stdioClient.close();
+});
+
+it("returns 401 with custom error message when { authenticated: false, error: '...' }", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+
+  const customErrorMessage = "Token expired at 2025-10-06T12:00:00Z";
+
+  // Mock authenticate callback with custom error message
+  const authenticate = vi.fn().mockResolvedValue({
+    authenticated: false,
+    error: customErrorMessage,
+  });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+
+      return mcpServer;
+    },
+    port,
+    stateless: true,
+  });
+
+  // Make request directly with fetch to check error message
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "Accept": "application/json, text/event-stream",
+      "Authorization": "Bearer expired-token",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(401);
+
+  const errorResponse = (await response.json()) as {
+    error: { code: number; message: string };
+    id: null | number;
+    jsonrpc: string;
+  };
+  expect(errorResponse.error.message).toBe(customErrorMessage);
+
+  await httpServer.close();
+  await stdioClient.close();
+});
+
+it("returns 401 when createServer throws authentication error", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const port = await getRandomPort();
+
+  // Mock authenticate that passes, but createServer throws auth error
+  const authenticate = vi.fn().mockResolvedValue({
+    authenticated: true,
+    session: { userId: "test" },
+  });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      // Simulate FastMCP throwing error for authenticated: false
+      throw new Error("Authentication failed: Invalid JWT payload");
+    },
+    port,
+    stateless: true,
+  });
+
+  // Make request
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "Accept": "application/json, text/event-stream",
+      "Authorization": "Bearer test-token",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(401);
+
+  const errorResponse = (await response.json()) as {
+    error: { code: number; message: string };
+    id: null | number;
+    jsonrpc: string;
+  };
+  expect(errorResponse.error.message).toContain("Authentication failed");
+
+  await httpServer.close();
+  await stdioClient.close();
+});
+
+it("returns 401 when createServer throws JWT-related error", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      throw new Error("Invalid JWT signature");
+    },
+    port,
+    stateless: true,
+  });
+
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(401);
+
+  const errorResponse = (await response.json()) as {
+    error: { code: number; message: string };
+    id: null | number;
+    jsonrpc: string;
+  };
+  expect(errorResponse.error.message).toContain("Invalid JWT");
+
+  await httpServer.close();
+});
+
+it("returns 401 when createServer throws Token-related error", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      throw new Error("Token has been revoked");
+    },
+    port,
+    stateless: true,
+  });
+
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(401);
+
+  const errorResponse = (await response.json()) as {
+    error: { code: number; message: string };
+    id: null | number;
+    jsonrpc: string;
+  };
+  expect(errorResponse.error.message).toContain("Token");
+
+  await httpServer.close();
+});
+
+it("returns 401 when createServer throws Unauthorized error", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      throw new Error("Unauthorized access");
+    },
+    port,
+    stateless: true,
+  });
+
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(401);
+
+  const errorResponse = (await response.json()) as {
+    error: { code: number; message: string };
+    id: null | number;
+    jsonrpc: string;
+  };
+  expect(errorResponse.error.message).toContain("Unauthorized");
+
+  await httpServer.close();
+});
+
+it("returns 500 when createServer throws non-auth error", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      throw new Error("Database connection failed");
+    },
+    port,
+    stateless: true,
+  });
+
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(500);
+
+  await httpServer.close();
+});
+
+it("succeeds when authenticate returns { authenticated: true } in stateless mode", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    {
+      name: "mcp-proxy",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+
+  // Mock authenticate callback that returns { authenticated: true }
+  const authenticate = vi.fn().mockResolvedValue({
+    authenticated: true,
+    session: { email: "test@example.com", userId: "user123" },
+  });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+
+      return mcpServer;
+    },
+    port,
+    stateless: true,
+  });
+
+  // Create client with valid Bearer token
+  const streamTransport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/mcp`),
+    {
+      requestInit: {
+        headers: {
+          Authorization: "Bearer valid-jwt-token",
+        },
+      },
+    },
+  );
+
+  const streamClient = new Client(
+    {
+      name: "stream-client-auth-true",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  // Should connect successfully
+  await streamClient.connect(streamTransport);
+
+  // Should be able to make requests
+  const result = await streamClient.listResources();
+  expect(result.resources).toBeDefined();
+
+  // Verify authenticate callback was called
+  expect(authenticate).toHaveBeenCalled();
+
+  await streamClient.close();
+  await httpServer.close();
+  await stdioClient.close();
+});

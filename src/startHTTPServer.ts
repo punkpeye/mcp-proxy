@@ -138,13 +138,21 @@ const handleStreamRequest = async <T extends ServerLike>({
       if (stateless && authenticate) {
         try {
           const authResult = await authenticate(req);
-          if (!authResult) {
+
+          // Check for both falsy AND { authenticated: false } pattern
+          if (!authResult || (typeof authResult === 'object' && 'authenticated' in authResult && !authResult.authenticated)) {
+            // Extract error message if available
+            const errorMessage =
+              authResult && typeof authResult === 'object' && 'error' in authResult && typeof authResult.error === 'string'
+                ? authResult.error
+                : "Unauthorized: Authentication failed";
+
             res.setHeader("Content-Type", "application/json");
             res.writeHead(401).end(
               JSON.stringify({
                 error: {
                   code: -32000,
-                  message: "Unauthorized: Authentication failed"
+                  message: errorMessage
                 },
                 id: (body as { id?: unknown })?.id ?? null,
                 jsonrpc: "2.0"
@@ -153,13 +161,15 @@ const handleStreamRequest = async <T extends ServerLike>({
             return true;
           }
         } catch (error) {
+          // Extract error details from thrown errors
+          const errorMessage = error instanceof Error ? error.message : "Unauthorized: Authentication error";
           console.error("Authentication error:", error);
           res.setHeader("Content-Type", "application/json");
           res.writeHead(401).end(
             JSON.stringify({
               error: {
                 code: -32000,
-                message: "Unauthorized: Authentication error"
+                message: errorMessage
               },
               id: (body as { id?: unknown })?.id ?? null,
               jsonrpc: "2.0"
@@ -223,6 +233,26 @@ const handleStreamRequest = async <T extends ServerLike>({
         try {
           server = await createServer(req);
         } catch (error) {
+          // Detect authentication errors and return HTTP 401
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const isAuthError = errorMessage.includes('Authentication') ||
+                             errorMessage.includes('Invalid JWT') ||
+                             errorMessage.includes('Token') ||
+                             errorMessage.includes('Unauthorized');
+
+          if (isAuthError) {
+            res.setHeader("Content-Type", "application/json");
+            res.writeHead(401).end(JSON.stringify({
+              error: {
+                code: -32000,
+                message: errorMessage
+              },
+              id: (body as { id?: unknown })?.id ?? null,
+              jsonrpc: "2.0"
+            }));
+            return true;
+          }
+
           if (handleResponseError(error, res)) {
             return true;
           }
@@ -255,6 +285,26 @@ const handleStreamRequest = async <T extends ServerLike>({
         try {
           server = await createServer(req);
         } catch (error) {
+          // Detect authentication errors and return HTTP 401
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const isAuthError = errorMessage.includes('Authentication') ||
+                             errorMessage.includes('Invalid JWT') ||
+                             errorMessage.includes('Token') ||
+                             errorMessage.includes('Unauthorized');
+
+          if (isAuthError) {
+            res.setHeader("Content-Type", "application/json");
+            res.writeHead(401).end(JSON.stringify({
+              error: {
+                code: -32000,
+                message: errorMessage
+              },
+              id: (body as { id?: unknown })?.id ?? null,
+              jsonrpc: "2.0"
+            }));
+            return true;
+          }
+
           if (handleResponseError(error, res)) {
             return true;
           }
