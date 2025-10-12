@@ -1,3 +1,5 @@
+export type { AuthConfig } from "./authentication.js";
+export { AuthenticationMiddleware } from "./authentication.js";
 export { InMemoryEventStore } from "./InMemoryEventStore.js";
 export { proxyServer } from "./proxyServer.js";
 export { startHTTPServer } from "./startHTTPServer.js";

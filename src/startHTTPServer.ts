@@ -8,7 +8,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import http from "http";
 import { randomUUID } from "node:crypto";
 
-import { AuthenticationMiddleware } from "./authentication.js";
+import { AuthConfig, AuthenticationMiddleware } from "./authentication.js";
 import { InMemoryEventStore } from "./InMemoryEventStore.js";
 
 export type SSEServer = {
@@ -47,6 +47,17 @@ const createJsonRpcErrorResponse = (code: number, message: string) => {
     id: null,
     jsonrpc: "2.0",
   });
+};
+
+// Helper function to get WWW-Authenticate header value
+const getWWWAuthenticateHeader = (
+  oauth?: AuthConfig["oauth"],
+): string | undefined => {
+  if (!oauth?.protectedResource?.resource) {
+    return undefined;
+  }
+
+  return `Bearer resource_metadata="${oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`;
 };
 
 // Helper function to handle Response errors and send appropriate HTTP response
@@ -98,6 +109,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   enableJsonResponse,
   endpoint,
   eventStore,
+  oauth,
   onClose,
   onConnect,
   req,
@@ -113,6 +125,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   enableJsonResponse?: boolean;
   endpoint: string;
   eventStore?: EventStore;
+  oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
   req: http.IncomingMessage;
@@ -148,6 +161,13 @@ const handleStreamRequest = async <T extends ServerLike>({
                 : "Unauthorized: Authentication failed";
 
             res.setHeader("Content-Type", "application/json");
+
+            // Add WWW-Authenticate header if OAuth config is available
+            const wwwAuthHeader = getWWWAuthenticateHeader(oauth);
+            if (wwwAuthHeader) {
+              res.setHeader("WWW-Authenticate", wwwAuthHeader);
+            }
+
             res.writeHead(401).end(
               JSON.stringify({
                 error: {
@@ -165,6 +185,13 @@ const handleStreamRequest = async <T extends ServerLike>({
           const errorMessage = error instanceof Error ? error.message : "Unauthorized: Authentication error";
           console.error("Authentication error:", error);
           res.setHeader("Content-Type", "application/json");
+
+          // Add WWW-Authenticate header if OAuth config is available
+          const wwwAuthHeader = getWWWAuthenticateHeader(oauth);
+          if (wwwAuthHeader) {
+            res.setHeader("WWW-Authenticate", wwwAuthHeader);
+          }
+
           res.writeHead(401).end(
             JSON.stringify({
               error: {
@@ -242,6 +269,13 @@ const handleStreamRequest = async <T extends ServerLike>({
 
           if (isAuthError) {
             res.setHeader("Content-Type", "application/json");
+
+            // Add WWW-Authenticate header if OAuth config is available
+            const wwwAuthHeader = getWWWAuthenticateHeader(oauth);
+            if (wwwAuthHeader) {
+              res.setHeader("WWW-Authenticate", wwwAuthHeader);
+            }
+
             res.writeHead(401).end(JSON.stringify({
               error: {
                 code: -32000,
@@ -294,6 +328,13 @@ const handleStreamRequest = async <T extends ServerLike>({
 
           if (isAuthError) {
             res.setHeader("Content-Type", "application/json");
+
+            // Add WWW-Authenticate header if OAuth config is available
+            const wwwAuthHeader = getWWWAuthenticateHeader(oauth);
+            if (wwwAuthHeader) {
+              res.setHeader("WWW-Authenticate", wwwAuthHeader);
+            }
+
             res.writeHead(401).end(JSON.stringify({
               error: {
                 code: -32000,
@@ -549,6 +590,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   enableJsonResponse,
   eventStore,
   host = "::",
+  oauth,
   onClose,
   onConnect,
   onUnhandledRequest,
@@ -563,6 +605,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   enableJsonResponse?: boolean;
   eventStore?: EventStore;
   host?: string;
+  oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
   onUnhandledRequest?: (
@@ -584,7 +627,7 @@ export const startHTTPServer = async <T extends ServerLike>({
     }
   > = {};
 
-  const authMiddleware = new AuthenticationMiddleware({ apiKey });
+  const authMiddleware = new AuthenticationMiddleware({ apiKey, oauth });
 
   /**
    * @author https://dev.classmethod.jp/articles/mcp-sse/
@@ -647,6 +690,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         enableJsonResponse,
         endpoint: streamEndpoint,
         eventStore,
+        oauth,
         onClose,
         onConnect,
         req,

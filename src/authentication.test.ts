@@ -103,15 +103,90 @@ describe("AuthenticationMiddleware", () => {
       expect(body.id).toBe(null);
     });
 
-    it("should have consistent format regardless of configuration", () => {
+    it("should have consistent body format regardless of configuration", () => {
       const middleware1 = new AuthenticationMiddleware({});
       const middleware2 = new AuthenticationMiddleware({ apiKey: "test" });
 
       const response1 = middleware1.getUnauthorizedResponse();
       const response2 = middleware2.getUnauthorizedResponse();
 
-      expect(response1.headers).toEqual(response2.headers);
       expect(response1.body).toEqual(response2.body);
+    });
+
+    it("should not include WWW-Authenticate header without OAuth config", () => {
+      const middleware = new AuthenticationMiddleware({ apiKey: "test" });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toBeUndefined();
+    });
+
+    it("should include WWW-Authenticate header with OAuth config", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toBe(
+        'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+      );
+    });
+
+    it("should handle OAuth config with trailing slash in resource URL", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com/",
+          },
+        },
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toBe(
+        'Bearer resource_metadata="https://example.com//.well-known/oauth-protected-resource"',
+      );
+    });
+
+    it("should not include WWW-Authenticate header when OAuth config is empty", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {},
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toBeUndefined();
+    });
+
+    it("should not include WWW-Authenticate header when protectedResource is empty", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          protectedResource: {},
+        },
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toBeUndefined();
+    });
+
+    it("should include WWW-Authenticate header with OAuth config but no apiKey", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toBe(
+        'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+      );
     });
   });
 });
