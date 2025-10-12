@@ -2,12 +2,26 @@ import type { IncomingMessage } from "http";
 
 export interface AuthConfig {
   apiKey?: string;
+  oauth?: {
+    protectedResource?: {
+      resource?: string;
+    };
+  };
 }
 
 export class AuthenticationMiddleware {
   constructor(private config: AuthConfig = {}) {}
 
   getUnauthorizedResponse() {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    // Add WWW-Authenticate header if OAuth config is available
+    if (this.config.oauth?.protectedResource?.resource) {
+      headers["WWW-Authenticate"] = `Bearer resource_metadata="${this.config.oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`;
+    }
+
     return {
       body: JSON.stringify({
         error: {
@@ -17,9 +31,7 @@ export class AuthenticationMiddleware {
         id: null,
         jsonrpc: "2.0",
       }),
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
     };
   }
 

@@ -75,6 +75,27 @@ const handleResponseError = (
   return false;
 };
 
+// Helper function to construct WWW-Authenticate header value
+const getWWWAuthenticateHeader = (
+  oauth?: {
+    protectedResource?: {
+      resource?: string;
+    };
+  },
+  req?: http.IncomingMessage,
+): null | string => {
+  if (oauth?.protectedResource?.resource) {
+    return `Bearer resource_metadata="${oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`;
+  }
+  // Fallback: construct from request if available
+  if (req) {
+    const protocol = req.headers["x-forwarded-proto"] || "http";
+    const host = req.headers.host || "localhost";
+    return `Bearer resource_metadata="${protocol}://${host}/.well-known/oauth-protected-resource"`;
+  }
+  return null;
+};
+
 // Helper function to clean up server resources
 const cleanupServer = async <T extends ServerLike>(
   server: T,
@@ -98,6 +119,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   enableJsonResponse,
   endpoint,
   eventStore,
+  oauth,
   onClose,
   onConnect,
   req,
@@ -113,6 +135,11 @@ const handleStreamRequest = async <T extends ServerLike>({
   enableJsonResponse?: boolean;
   endpoint: string;
   eventStore?: EventStore;
+  oauth?: {
+    protectedResource?: {
+      resource?: string;
+    };
+  };
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
   req: http.IncomingMessage;
@@ -139,7 +166,11 @@ const handleStreamRequest = async <T extends ServerLike>({
         try {
           const authResult = await authenticate(req);
           if (!authResult) {
+            const wwwAuthHeader = getWWWAuthenticateHeader(oauth, req);
             res.setHeader("Content-Type", "application/json");
+            if (wwwAuthHeader) {
+              res.setHeader("WWW-Authenticate", wwwAuthHeader);
+            }
             res.writeHead(401).end(
               JSON.stringify({
                 error: {
@@ -154,7 +185,11 @@ const handleStreamRequest = async <T extends ServerLike>({
           }
         } catch (error) {
           console.error("Authentication error:", error);
+          const wwwAuthHeader = getWWWAuthenticateHeader(oauth, req);
           res.setHeader("Content-Type", "application/json");
+          if (wwwAuthHeader) {
+            res.setHeader("WWW-Authenticate", wwwAuthHeader);
+          }
           res.writeHead(401).end(
             JSON.stringify({
               error: {
@@ -499,6 +534,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   enableJsonResponse,
   eventStore,
   host = "::",
+  oauth,
   onClose,
   onConnect,
   onUnhandledRequest,
@@ -513,6 +549,11 @@ export const startHTTPServer = async <T extends ServerLike>({
   enableJsonResponse?: boolean;
   eventStore?: EventStore;
   host?: string;
+  oauth?: {
+    protectedResource?: {
+      resource?: string;
+    };
+  };
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
   onUnhandledRequest?: (
@@ -534,7 +575,7 @@ export const startHTTPServer = async <T extends ServerLike>({
     }
   > = {};
 
-  const authMiddleware = new AuthenticationMiddleware({ apiKey });
+  const authMiddleware = new AuthenticationMiddleware({ apiKey, oauth });
 
   /**
    * @author https://dev.classmethod.jp/articles/mcp-sse/
@@ -597,6 +638,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         enableJsonResponse,
         endpoint: streamEndpoint,
         eventStore,
+        oauth,
         onClose,
         onConnect,
         req,
