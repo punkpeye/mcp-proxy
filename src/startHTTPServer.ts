@@ -11,6 +11,15 @@ import { randomUUID } from "node:crypto";
 import { AuthConfig, AuthenticationMiddleware } from "./authentication.js";
 import { InMemoryEventStore } from "./InMemoryEventStore.js";
 
+export interface CorsOptions {
+  allowedHeaders?: string | string[]; // Allow string[] or '*' for wildcard
+  credentials?: boolean;
+  exposedHeaders?: string[];
+  maxAge?: number;
+  methods?: string[];
+  origin?: ((origin: string) => boolean) | string | string[];
+}
+
 export type SSEServer = {
   close: () => Promise<void>;
 };
@@ -99,6 +108,94 @@ const cleanupServer = async <T extends ServerLike>(
     await server.close();
   } catch (error) {
     console.error("[mcp-proxy] error closing server", error);
+  }
+};
+
+// Helper function to apply CORS headers
+const applyCorsHeaders = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  corsOptions?: boolean | CorsOptions,
+) => {
+  if (!req.headers.origin) {
+    return;
+  }
+
+  // Default CORS configuration for backward compatibility
+  const defaultCorsOptions: CorsOptions = {
+    allowedHeaders: "Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id",
+    credentials: true,
+    exposedHeaders: ["Mcp-Session-Id"],
+    methods: ["GET", "POST", "OPTIONS"],
+    origin: "*",
+  };
+
+  let finalCorsOptions: CorsOptions;
+
+  if (corsOptions === false) {
+    // CORS disabled
+    return;
+  } else if (corsOptions === true || corsOptions === undefined) {
+    // Use default CORS settings
+    finalCorsOptions = defaultCorsOptions;
+  } else {
+    // Merge user options with defaults
+    finalCorsOptions = {
+      ...defaultCorsOptions,
+      ...corsOptions,
+    };
+  }
+
+  try {
+    const origin = new URL(req.headers.origin);
+
+    // Handle origin
+    let allowedOrigin = "*";
+    if (finalCorsOptions.origin) {
+      if (typeof finalCorsOptions.origin === "string") {
+        allowedOrigin = finalCorsOptions.origin;
+      } else if (Array.isArray(finalCorsOptions.origin)) {
+        allowedOrigin = finalCorsOptions.origin.includes(origin.origin)
+          ? origin.origin
+          : "false";
+      } else if (typeof finalCorsOptions.origin === "function") {
+        allowedOrigin = finalCorsOptions.origin(origin.origin) ? origin.origin : "false";
+      }
+    }
+
+    if (allowedOrigin !== "false") {
+      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    }
+
+    // Handle credentials
+    if (finalCorsOptions.credentials !== undefined) {
+      res.setHeader("Access-Control-Allow-Credentials", finalCorsOptions.credentials.toString());
+    }
+
+    // Handle methods
+    if (finalCorsOptions.methods) {
+      res.setHeader("Access-Control-Allow-Methods", finalCorsOptions.methods.join(", "));
+    }
+
+    // Handle allowed headers
+    if (finalCorsOptions.allowedHeaders) {
+      const allowedHeaders = typeof finalCorsOptions.allowedHeaders === "string"
+        ? finalCorsOptions.allowedHeaders
+        : finalCorsOptions.allowedHeaders.join(", ");
+      res.setHeader("Access-Control-Allow-Headers", allowedHeaders);
+    }
+
+    // Handle exposed headers
+    if (finalCorsOptions.exposedHeaders) {
+      res.setHeader("Access-Control-Expose-Headers", finalCorsOptions.exposedHeaders.join(", "));
+    }
+
+    // Handle max age
+    if (finalCorsOptions.maxAge !== undefined) {
+      res.setHeader("Access-Control-Max-Age", finalCorsOptions.maxAge.toString());
+    }
+  } catch (error) {
+    console.error("[mcp-proxy] error parsing origin", error);
   }
 };
 
@@ -586,6 +683,7 @@ const handleSSERequest = async <T extends ServerLike>({
 export const startHTTPServer = async <T extends ServerLike>({
   apiKey,
   authenticate,
+  cors,
   createServer,
   enableJsonResponse,
   eventStore,
@@ -601,6 +699,7 @@ export const startHTTPServer = async <T extends ServerLike>({
 }: {
   apiKey?: string;
   authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
+  cors?: boolean | CorsOptions;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
   eventStore?: EventStore;
@@ -633,19 +732,8 @@ export const startHTTPServer = async <T extends ServerLike>({
    * @author https://dev.classmethod.jp/articles/mcp-sse/
    */
   const httpServer = http.createServer(async (req, res) => {
-    if (req.headers.origin) {
-      try {
-        const origin = new URL(req.headers.origin);
-
-        res.setHeader("Access-Control-Allow-Origin", origin.origin);
-        res.setHeader("Access-Control-Allow-Credentials", "true");
-        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id");
-        res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
-      } catch (error) {
-        console.error("[mcp-proxy] error parsing origin", error);
-      }
-    }
+    // Apply CORS headers
+    applyCorsHeaders(req, res, cors);
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);

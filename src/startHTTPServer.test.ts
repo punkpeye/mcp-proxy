@@ -1675,3 +1675,251 @@ it("succeeds when authenticate returns { authenticated: true } in stateless mode
   await httpServer.close();
   await stdioClient.close();
 });
+
+// CORS Configuration Tests
+
+it("supports wildcard CORS headers", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    cors: {
+      allowedHeaders: "*",
+    },
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Test OPTIONS request to verify CORS headers
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      Origin: "https://example.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response.status).toBe(204);
+
+  // Verify wildcard is used for allowed headers
+  const allowedHeaders = response.headers.get("Access-Control-Allow-Headers");
+  expect(allowedHeaders).toBe("*");
+
+  await httpServer.close();
+});
+
+it("supports custom CORS headers array", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    cors: {
+      allowedHeaders: ["Content-Type", "X-Custom-Header", "X-API-Key"],
+    },
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Test OPTIONS request to verify CORS headers
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      Origin: "https://example.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response.status).toBe(204);
+
+  // Verify custom headers are used
+  const allowedHeaders = response.headers.get("Access-Control-Allow-Headers");
+  expect(allowedHeaders).toBe("Content-Type, X-Custom-Header, X-API-Key");
+
+  await httpServer.close();
+});
+
+it("supports origin validation with array", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    cors: {
+      origin: ["https://app.example.com", "https://admin.example.com"],
+    },
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Test with allowed origin
+  const response1 = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      Origin: "https://app.example.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response1.status).toBe(204);
+  expect(response1.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+
+  // Test with disallowed origin
+  const response2 = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      Origin: "https://malicious.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response2.status).toBe(204);
+  expect(response2.headers.get("Access-Control-Allow-Origin")).toBeNull();
+
+  await httpServer.close();
+});
+
+it("supports origin validation with function", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    cors: {
+      origin: (origin: string) => origin.endsWith(".example.com"),
+    },
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Test with allowed origin
+  const response1 = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      Origin: "https://subdomain.example.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response1.status).toBe(204);
+  expect(response1.headers.get("Access-Control-Allow-Origin")).toBe("https://subdomain.example.com");
+
+  // Test with disallowed origin
+  const response2 = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      Origin: "https://malicious.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response2.status).toBe(204);
+  expect(response2.headers.get("Access-Control-Allow-Origin")).toBeNull();
+
+  await httpServer.close();
+});
+
+it("disables CORS when cors: false", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    cors: false,
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Test OPTIONS request - should not have CORS headers
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      Origin: "https://example.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response.status).toBe(204);
+  expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  expect(response.headers.get("Access-Control-Allow-Headers")).toBeNull();
+
+  await httpServer.close();
+});
+
+it("uses default CORS settings when cors: true", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    cors: true,
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Test OPTIONS request to verify default CORS headers
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      Origin: "https://example.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response.status).toBe(204);
+  expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  expect(response.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id");
+  expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+
+  await httpServer.close();
+});
+
+it("supports custom methods and maxAge", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    cors: {
+      maxAge: 86400,
+      methods: ["GET", "POST", "PUT", "DELETE"],
+    },
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Test OPTIONS request to verify custom settings
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      Origin: "https://example.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response.status).toBe(204);
+  expect(response.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, PUT, DELETE");
+  expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
+
+  await httpServer.close();
+});
