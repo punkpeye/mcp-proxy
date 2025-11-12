@@ -1585,6 +1585,150 @@ it("returns 500 when createServer throws non-auth error", async () => {
   await httpServer.close();
 });
 
+it("includes WWW-Authenticate header in 401 response with OAuth config", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      throw new Error("Invalid JWT token");
+    },
+    oauth: {
+      protectedResource: {
+        resource: "https://example.com",
+      },
+      realm: "mcp-server",
+    },
+    port,
+    stateless: true,
+  });
+
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(401);
+
+  const wwwAuthHeader = response.headers.get("WWW-Authenticate");
+  expect(wwwAuthHeader).toBeTruthy();
+  expect(wwwAuthHeader).toContain('Bearer');
+  expect(wwwAuthHeader).toContain('realm="mcp-server"');
+  expect(wwwAuthHeader).toContain('resource_metadata="https://example.com/.well-known/oauth-protected-resource"');
+  expect(wwwAuthHeader).toContain('error="invalid_token"');
+  expect(wwwAuthHeader).toContain('error_description="Invalid JWT token"');
+
+  await httpServer.close();
+});
+
+it("includes WWW-Authenticate header when authenticate callback fails with OAuth", async () => {
+  const port = await getRandomPort();
+
+  const authenticate = vi.fn().mockRejectedValue(new Error("Token signature verification failed"));
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    oauth: {
+      error_uri: "https://example.com/docs/errors",
+      protectedResource: {
+        resource: "https://api.example.com",
+      },
+      realm: "example-api",
+    },
+    port,
+    stateless: true,
+  });
+
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "Accept": "application/json, text/event-stream",
+      "Authorization": "Bearer expired-token",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(401);
+  expect(authenticate).toHaveBeenCalled();
+
+  const wwwAuthHeader = response.headers.get("WWW-Authenticate");
+  expect(wwwAuthHeader).toBeTruthy();
+  expect(wwwAuthHeader).toContain('Bearer');
+  expect(wwwAuthHeader).toContain('realm="example-api"');
+  expect(wwwAuthHeader).toContain('resource_metadata="https://api.example.com/.well-known/oauth-protected-resource"');
+  expect(wwwAuthHeader).toContain('error="invalid_token"');
+  expect(wwwAuthHeader).toContain('error_description="Token signature verification failed"');
+  expect(wwwAuthHeader).toContain('error_uri="https://example.com/docs/errors"');
+
+  await httpServer.close();
+});
+
+it("does not include WWW-Authenticate header in 401 response without OAuth config", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      throw new Error("Authentication required");
+    },
+    port,
+    stateless: true,
+  });
+
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(401);
+
+  const wwwAuthHeader = response.headers.get("WWW-Authenticate");
+  expect(wwwAuthHeader).toBeNull();
+
+  await httpServer.close();
+});
+
 it("succeeds when authenticate returns { authenticated: true } in stateless mode", async () => {
   const stdioTransport = new StdioClientTransport({
     args: ["src/fixtures/simple-stdio-server.ts"],

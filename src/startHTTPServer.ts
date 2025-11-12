@@ -61,22 +61,82 @@ const createJsonRpcErrorResponse = (code: number, message: string) => {
 // Helper function to get WWW-Authenticate header value
 const getWWWAuthenticateHeader = (
   oauth?: AuthConfig["oauth"],
+  options?: {
+    error?: string;
+    error_description?: string;
+    error_uri?: string;
+    scope?: string;
+  },
 ): string | undefined => {
-  if (!oauth?.protectedResource?.resource) {
+  if (!oauth) {
     return undefined;
   }
 
-  return `Bearer resource_metadata="${oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`;
+  const params: string[] = [];
+
+  // Add realm if configured
+  if (oauth.realm) {
+    params.push(`realm="${oauth.realm}"`);
+  }
+
+  // Add resource_metadata if configured
+  if (oauth.protectedResource?.resource) {
+    params.push(`resource_metadata="${oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`);
+  }
+
+  // Add error from options or config (options takes precedence)
+  const error = options?.error || oauth.error;
+  if (error) {
+    params.push(`error="${error}"`);
+  }
+
+  // Add error_description from options or config (options takes precedence)
+  const error_description = options?.error_description || oauth.error_description;
+  if (error_description) {
+    // Escape quotes in error description
+    const escaped = error_description.replace(/"/g, '\\"');
+    params.push(`error_description="${escaped}"`);
+  }
+
+  // Add error_uri from options or config (options takes precedence)
+  const error_uri = options?.error_uri || oauth.error_uri;
+  if (error_uri) {
+    params.push(`error_uri="${error_uri}"`);
+  }
+
+  // Add scope from options or config (options takes precedence)
+  const scope = options?.scope || oauth.scope;
+  if (scope) {
+    params.push(`scope="${scope}"`);
+  }
+
+  // Return undefined if no parameters were added
+  if (params.length === 0) {
+    return undefined;
+  }
+
+  return `Bearer ${params.join(", ")}`;
 };
 
 // Helper function to handle Response errors and send appropriate HTTP response
-const handleResponseError = (
+const handleResponseError = async (
   error: unknown,
   res: http.ServerResponse,
-): boolean => {
-  if (error instanceof Response) {
+): Promise<boolean> => {
+  // Check if it's a Response-like object (duck typing)
+  // The instanceof check may fail due to different Response implementations across module boundaries
+  const isResponseLike = error &&
+    typeof error === 'object' &&
+    'status' in error &&
+    'headers' in error &&
+    'statusText' in error;
+
+  if (isResponseLike || error instanceof Response) {
+    const responseError = error as Response;
+
+    // Convert Headers to http.OutgoingHttpHeaders format
     const fixedHeaders: http.OutgoingHttpHeaders = {};
-    error.headers.forEach((value, key) => {
+    responseError.headers.forEach((value, key) => {
       if (fixedHeaders[key]) {
         if (Array.isArray(fixedHeaders[key])) {
           (fixedHeaders[key] as string[]).push(value);
@@ -87,11 +147,16 @@ const handleResponseError = (
         fixedHeaders[key] = value;
       }
     });
-    res
-      .writeHead(error.status, error.statusText, fixedHeaders)
-      .end(error.statusText);
+
+    // Read the body from the Response object
+    const body = await responseError.text();
+
+    res.writeHead(responseError.status, responseError.statusText, fixedHeaders);
+    res.end(body);
+
     return true;
   }
+
   return false;
 };
 
@@ -260,7 +325,10 @@ const handleStreamRequest = async <T extends ServerLike>({
             res.setHeader("Content-Type", "application/json");
 
             // Add WWW-Authenticate header if OAuth config is available
-            const wwwAuthHeader = getWWWAuthenticateHeader(oauth);
+            const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
+              error: "invalid_token",
+              error_description: errorMessage,
+            });
             if (wwwAuthHeader) {
               res.setHeader("WWW-Authenticate", wwwAuthHeader);
             }
@@ -278,13 +346,21 @@ const handleStreamRequest = async <T extends ServerLike>({
             return true;
           }
         } catch (error) {
+          // Check if error is a Response object with headers already set
+          if (await handleResponseError(error, res)) {
+            return true;
+          }
+
           // Extract error details from thrown errors
           const errorMessage = error instanceof Error ? error.message : "Unauthorized: Authentication error";
           console.error("Authentication error:", error);
           res.setHeader("Content-Type", "application/json");
 
           // Add WWW-Authenticate header if OAuth config is available
-          const wwwAuthHeader = getWWWAuthenticateHeader(oauth);
+          const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
+            error: "invalid_token",
+            error_description: errorMessage,
+          });
           if (wwwAuthHeader) {
             res.setHeader("WWW-Authenticate", wwwAuthHeader);
           }
@@ -357,6 +433,11 @@ const handleStreamRequest = async <T extends ServerLike>({
         try {
           server = await createServer(req);
         } catch (error) {
+          // Check if error is a Response object with headers already set
+          if (await handleResponseError(error, res)) {
+            return true;
+          }
+
           // Detect authentication errors and return HTTP 401
           const errorMessage = error instanceof Error ? error.message : String(error);
           const isAuthError = errorMessage.includes('Authentication') ||
@@ -368,7 +449,10 @@ const handleStreamRequest = async <T extends ServerLike>({
             res.setHeader("Content-Type", "application/json");
 
             // Add WWW-Authenticate header if OAuth config is available
-            const wwwAuthHeader = getWWWAuthenticateHeader(oauth);
+            const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
+              error: "invalid_token",
+              error_description: errorMessage,
+            });
             if (wwwAuthHeader) {
               res.setHeader("WWW-Authenticate", wwwAuthHeader);
             }
@@ -381,10 +465,6 @@ const handleStreamRequest = async <T extends ServerLike>({
               id: (body as { id?: unknown })?.id ?? null,
               jsonrpc: "2.0"
             }));
-            return true;
-          }
-
-          if (handleResponseError(error, res)) {
             return true;
           }
 
@@ -416,6 +496,11 @@ const handleStreamRequest = async <T extends ServerLike>({
         try {
           server = await createServer(req);
         } catch (error) {
+          // Check if error is a Response object with headers already set
+          if (await handleResponseError(error, res)) {
+            return true;
+          }
+
           // Detect authentication errors and return HTTP 401
           const errorMessage = error instanceof Error ? error.message : String(error);
           const isAuthError = errorMessage.includes('Authentication') ||
@@ -427,7 +512,10 @@ const handleStreamRequest = async <T extends ServerLike>({
             res.setHeader("Content-Type", "application/json");
 
             // Add WWW-Authenticate header if OAuth config is available
-            const wwwAuthHeader = getWWWAuthenticateHeader(oauth);
+            const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
+              error: "invalid_token",
+              error_description: errorMessage,
+            });
             if (wwwAuthHeader) {
               res.setHeader("WWW-Authenticate", wwwAuthHeader);
             }
@@ -440,10 +528,6 @@ const handleStreamRequest = async <T extends ServerLike>({
               id: (body as { id?: unknown })?.id ?? null,
               jsonrpc: "2.0"
             }));
-            return true;
-          }
-
-          if (handleResponseError(error, res)) {
             return true;
           }
 
@@ -601,7 +685,7 @@ const handleSSERequest = async <T extends ServerLike>({
     try {
       server = await createServer(req);
     } catch (error) {
-      if (handleResponseError(error, res)) {
+      if (await handleResponseError(error, res)) {
         return true;
       }
 

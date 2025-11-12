@@ -132,7 +132,7 @@ describe("AuthenticationMiddleware", () => {
       const response = middleware.getUnauthorizedResponse();
 
       expect(response.headers["WWW-Authenticate"]).toBe(
-        'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+        'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource", error="invalid_token", error_description="Unauthorized: Invalid or missing API key"',
       );
     });
 
@@ -148,21 +148,24 @@ describe("AuthenticationMiddleware", () => {
       const response = middleware.getUnauthorizedResponse();
 
       expect(response.headers["WWW-Authenticate"]).toBe(
-        'Bearer resource_metadata="https://example.com//.well-known/oauth-protected-resource"',
+        'Bearer resource_metadata="https://example.com//.well-known/oauth-protected-resource", error="invalid_token", error_description="Unauthorized: Invalid or missing API key"',
       );
     });
 
-    it("should not include WWW-Authenticate header when OAuth config is empty", () => {
+    it("should include minimal WWW-Authenticate header when OAuth config is empty object", () => {
       const middleware = new AuthenticationMiddleware({
         apiKey: "test",
         oauth: {},
       });
       const response = middleware.getUnauthorizedResponse();
 
-      expect(response.headers["WWW-Authenticate"]).toBeUndefined();
+      // Even with empty oauth object, default error and error_description are added
+      expect(response.headers["WWW-Authenticate"]).toBe(
+        'Bearer error="invalid_token", error_description="Unauthorized: Invalid or missing API key"',
+      );
     });
 
-    it("should not include WWW-Authenticate header when protectedResource is empty", () => {
+    it("should include minimal WWW-Authenticate header when protectedResource is empty", () => {
       const middleware = new AuthenticationMiddleware({
         apiKey: "test",
         oauth: {
@@ -171,7 +174,10 @@ describe("AuthenticationMiddleware", () => {
       });
       const response = middleware.getUnauthorizedResponse();
 
-      expect(response.headers["WWW-Authenticate"]).toBeUndefined();
+      // Even without resource_metadata, default error and error_description are added
+      expect(response.headers["WWW-Authenticate"]).toBe(
+        'Bearer error="invalid_token", error_description="Unauthorized: Invalid or missing API key"',
+      );
     });
 
     it("should include WWW-Authenticate header with OAuth config but no apiKey", () => {
@@ -185,8 +191,140 @@ describe("AuthenticationMiddleware", () => {
       const response = middleware.getUnauthorizedResponse();
 
       expect(response.headers["WWW-Authenticate"]).toBe(
-        'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+        'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource", error="invalid_token", error_description="Unauthorized: Invalid or missing API key"',
       );
+    });
+
+    it("should include realm in WWW-Authenticate header when configured", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+          realm: "example-realm",
+        },
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toContain('realm="example-realm"');
+      expect(response.headers["WWW-Authenticate"]).toContain('resource_metadata="https://example.com/.well-known/oauth-protected-resource"');
+    });
+
+    it("should include custom error in WWW-Authenticate header via options", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getUnauthorizedResponse({
+        error: "insufficient_scope",
+        error_description: "The request requires higher privileges",
+      });
+
+      expect(response.headers["WWW-Authenticate"]).toContain('error="insufficient_scope"');
+      expect(response.headers["WWW-Authenticate"]).toContain('error_description="The request requires higher privileges"');
+    });
+
+    it("should include scope in WWW-Authenticate header", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+          scope: "read write",
+        },
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toContain('scope="read write"');
+    });
+
+    it("should override config error with options error", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          error: "invalid_request",
+          error_description: "Config error description",
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getUnauthorizedResponse({
+        error: "invalid_token",
+        error_description: "Options error description",
+      });
+
+      expect(response.headers["WWW-Authenticate"]).toContain('error="invalid_token"');
+      expect(response.headers["WWW-Authenticate"]).toContain('error_description="Options error description"');
+      expect(response.headers["WWW-Authenticate"]).not.toContain("invalid_request");
+      expect(response.headers["WWW-Authenticate"]).not.toContain("Config error description");
+    });
+
+    it("should include error_uri in WWW-Authenticate header", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          error_uri: "https://example.com/errors/auth",
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toContain('error_uri="https://example.com/errors/auth"');
+    });
+
+    it("should properly escape quotes in error_description", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getUnauthorizedResponse({
+        error_description: 'Token "abc123" is invalid',
+      });
+
+      expect(response.headers["WWW-Authenticate"]).toContain('error_description="Token \\"abc123\\" is invalid"');
+    });
+
+    it("should include all parameters in correct order", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          error: "invalid_token",
+          error_description: "Token expired",
+          error_uri: "https://example.com/errors",
+          protectedResource: {
+            resource: "https://example.com",
+          },
+          realm: "my-realm",
+          scope: "read write",
+        },
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      const header = response.headers["WWW-Authenticate"];
+      expect(header).toContain('realm="my-realm"');
+      expect(header).toContain('resource_metadata="https://example.com/.well-known/oauth-protected-resource"');
+      expect(header).toContain('error="invalid_token"');
+      expect(header).toContain('error_description="Token expired"');
+      expect(header).toContain('error_uri="https://example.com/errors"');
+      expect(header).toContain('scope="read write"');
+
+      // Check order: realm, resource_metadata, error, error_description, error_uri, scope
+      expect(header.indexOf('realm=')).toBeLessThan(header.indexOf('resource_metadata='));
+      expect(header.indexOf('resource_metadata=')).toBeLessThan(header.indexOf('error='));
+      expect(header.indexOf('error=')).toBeLessThan(header.indexOf('error_description='));
     });
   });
 });
