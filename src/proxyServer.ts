@@ -124,10 +124,12 @@ export const proxyServer = async ({
     });
   }
 
-  server.setRequestHandler(CompleteRequestSchema, async (args) => {
-    return client.complete(
-      args.params,
-      requestTimeout ? { timeout: requestTimeout } : undefined,
-    );
-  });
+  if (serverCapabilities?.completions) {
+    server.setRequestHandler(CompleteRequestSchema, async (args) => {
+      return client.complete(
+        args.params,
+        requestTimeout ? { timeout: requestTimeout } : undefined,
+      );
+    });
+  }
 };
