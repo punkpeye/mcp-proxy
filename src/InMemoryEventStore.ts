@@ -81,7 +81,8 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /**
-   * Generates a monotonic unique event ID in `${streamId}_${timestamp}_${counter}` format.
+   * Generates a monotonic unique event ID in 
+   * `${streamId}_${timestamp}_${counter}_${random}` format.
    */
   private generateEventId(streamId: string): string {
 
@@ -94,11 +95,11 @@ export class InMemoryEventStore implements EventStore {
       this.lastTimestamp = now;
     }
 
-    const timestampPart = now.toString();
-    const counterPart = this.lastTimestampCounter.toString(36).padStart(4, "0");
-    const randomPart = Math.random().toString(36).substring(2, 5);
+    const timestamp = now.toString();
+    const counter = this.lastTimestampCounter.toString(36).padStart(4, "0");
+    const random = Math.random().toString(36).substring(2, 5);
 
-    return `${streamId}_${timestampPart}_${counterPart}_${randomPart}`;
+    return `${streamId}_${timestamp}_${counter}_${random}`;
   }
 
   /**
