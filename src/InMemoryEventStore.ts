@@ -14,6 +14,8 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 export class InMemoryEventStore implements EventStore {
   private events: Map<string, { message: JSONRPCMessage; streamId: string }> =
     new Map();
+  private lastTimestamp = 0;
+  private lastTimestampCounter = 0;
 
   /**
    * Replays events that occurred after a specific event ID
@@ -79,10 +81,24 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /**
-   * Generates a unique event ID for a given stream ID
+   * Generates a monotonic unique event ID in `${streamId}_${timestamp}_${counter}` format.
    */
   private generateEventId(streamId: string): string {
-    return `${streamId}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+
+    const now = Date.now();
+    
+    if (now === this.lastTimestamp) {
+      this.lastTimestampCounter++;
+    } else {
+      this.lastTimestampCounter = 0;
+      this.lastTimestamp = now;
+    }
+
+    const timestampPart = now.toString();
+    const counterPart = this.lastTimestampCounter.toString(36).padStart(4, "0");
+    const randomPart = Math.random().toString(36).substring(2, 5);
+
+    return `${streamId}_${timestampPart}_${counterPart}_${randomPart}`;
   }
 
   /**
