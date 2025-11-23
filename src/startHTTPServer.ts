@@ -718,8 +718,8 @@ const handleSSERequest = async <T extends ServerLike>({
 
       await transport.send({
         jsonrpc: "2.0",
-        method: "sse/connection",
-        params: { message: "SSE Connection established" },
+        method: "notifications/message",
+        params: { data: "SSE Connection established", level: "info" },
       });
 
       if (onConnect) {
