@@ -17,6 +17,51 @@ export interface AuthConfig {
 export class AuthenticationMiddleware {
   constructor(private config: AuthConfig = {}) {}
 
+  getScopeChallengeResponse(
+    requiredScopes: string[],
+    errorDescription?: string,
+    requestId?: unknown,
+  ): { body: string; headers: Record<string, string>; statusCode: number } {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    // Build WWW-Authenticate header with all required parameters
+    if (this.config.oauth?.protectedResource?.resource) {
+      const parts = [
+        "Bearer",
+        'error="insufficient_scope"',
+        `scope="${requiredScopes.join(" ")}"`,
+        `resource_metadata="${this.config.oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`,
+      ];
+
+      if (errorDescription) {
+        // Escape quotes in description
+        const escaped = errorDescription.replace(/"/g, '\\"');
+        parts.push(`error_description="${escaped}"`);
+      }
+
+      headers["WWW-Authenticate"] = parts.join(", ");
+    }
+
+    return {
+      body: JSON.stringify({
+        error: {
+          code: -32001, // Custom error code for insufficient scope
+          data: {
+            error: "insufficient_scope",
+            required_scopes: requiredScopes,
+          },
+          message: errorDescription || "Insufficient scope",
+        },
+        id: requestId ?? null,
+        jsonrpc: "2.0",
+      }),
+      headers,
+      statusCode: 403,
+    };
+  }
+
   getUnauthorizedResponse(options?: {
     error?: string;
     error_description?: string;

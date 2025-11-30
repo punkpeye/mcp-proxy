@@ -327,4 +327,199 @@ describe("AuthenticationMiddleware", () => {
       expect(header.indexOf('error=')).toBeLessThan(header.indexOf('error_description='));
     });
   });
+
+  describe("getScopeChallengeResponse", () => {
+    it("should return 403 status code", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(["read", "write"]);
+
+      expect(response.statusCode).toBe(403);
+    });
+
+    it("should include required scopes in WWW-Authenticate header", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(["read", "write"]);
+
+      expect(response.headers["WWW-Authenticate"]).toContain('error="insufficient_scope"');
+      expect(response.headers["WWW-Authenticate"]).toContain('scope="read write"');
+      expect(response.headers["WWW-Authenticate"]).toContain('resource_metadata="https://example.com/.well-known/oauth-protected-resource"');
+    });
+
+    it("should include error_description in WWW-Authenticate header", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(
+        ["admin"],
+        "Admin access required",
+      );
+
+      expect(response.headers["WWW-Authenticate"]).toContain('error_description="Admin access required"');
+    });
+
+    it("should escape quotes in error_description", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(
+        ["admin"],
+        'Requires "admin" scope',
+      );
+
+      expect(response.headers["WWW-Authenticate"]).toContain('error_description="Requires \\"admin\\" scope"');
+    });
+
+    it("should include request ID in response body", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(["read"], undefined, 123);
+
+      const body = JSON.parse(response.body);
+      expect(body.id).toBe(123);
+    });
+
+    it("should include required scopes in response body data", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(["read", "write"]);
+
+      const body = JSON.parse(response.body);
+      expect(body.error.code).toBe(-32001);
+      expect(body.error.message).toBe("Insufficient scope");
+      expect(body.error.data.error).toBe("insufficient_scope");
+      expect(body.error.data.required_scopes).toEqual(["read", "write"]);
+    });
+
+    it("should use custom error_description in response body message", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(
+        ["admin"],
+        "Admin privileges required",
+      );
+
+      const body = JSON.parse(response.body);
+      expect(body.error.message).toBe("Admin privileges required");
+    });
+
+    it("should handle single scope", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(["admin"]);
+
+      expect(response.headers["WWW-Authenticate"]).toContain('scope="admin"');
+      const body = JSON.parse(response.body);
+      expect(body.error.data.required_scopes).toEqual(["admin"]);
+    });
+
+    it("should handle multiple scopes", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(["read", "write", "admin"]);
+
+      expect(response.headers["WWW-Authenticate"]).toContain('scope="read write admin"');
+      const body = JSON.parse(response.body);
+      expect(body.error.data.required_scopes).toEqual(["read", "write", "admin"]);
+    });
+
+    it("should not include WWW-Authenticate header without OAuth config", () => {
+      const middleware = new AuthenticationMiddleware({});
+      const response = middleware.getScopeChallengeResponse(["admin"]);
+
+      expect(response.headers["WWW-Authenticate"]).toBeUndefined();
+      expect(response.headers["Content-Type"]).toBe("application/json");
+    });
+
+    it("should return proper JSON-RPC 2.0 format", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(["read"], "Description", "req-123");
+
+      const body = JSON.parse(response.body);
+      expect(body.jsonrpc).toBe("2.0");
+      expect(body.id).toBe("req-123");
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32001);
+      expect(body.error.message).toBe("Description");
+      expect(body.error.data).toBeDefined();
+    });
+
+    it("should include Content-Type header", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(["read"]);
+
+      expect(response.headers["Content-Type"]).toBe("application/json");
+    });
+
+    it("should handle empty scopes array", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse([]);
+
+      expect(response.headers["WWW-Authenticate"]).toContain('scope=""');
+      const body = JSON.parse(response.body);
+      expect(body.error.data.required_scopes).toEqual([]);
+    });
+  });
 });
