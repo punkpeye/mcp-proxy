@@ -118,6 +118,28 @@ const getWWWAuthenticateHeader = (
   return `Bearer ${params.join(", ")}`;
 };
 
+// Helper function to detect scope challenge errors
+const isScopeChallengeError = (error: unknown): error is {
+  data: {
+    error: string;
+    errorDescription?: string;
+    requiredScopes: string[];
+  };
+  name: string;
+} => {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "InsufficientScopeError" &&
+    "data" in error &&
+    typeof error.data === "object" &&
+    error.data !== null &&
+    "error" in error.data &&
+    error.data.error === "insufficient_scope"
+  );
+};
+
 // Helper function to handle Response errors and send appropriate HTTP response
 const handleResponseError = async (
   error: unknown,
@@ -267,6 +289,7 @@ const applyCorsHeaders = (
 const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
   authenticate,
+  authMiddleware,
   createServer,
   enableJsonResponse,
   endpoint,
@@ -283,6 +306,7 @@ const handleStreamRequest = async <T extends ServerLike>({
     { server: T; transport: StreamableHTTPServerTransport }
   >;
   authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
+  authMiddleware: AuthenticationMiddleware;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
   endpoint: string;
@@ -298,6 +322,7 @@ const handleStreamRequest = async <T extends ServerLike>({
     req.method === "POST" &&
     new URL(req.url!, "http://localhost").pathname === endpoint
   ) {
+    let body: unknown;
     try {
       const sessionId = Array.isArray(req.headers["mcp-session-id"])
         ? req.headers["mcp-session-id"][0]
@@ -307,7 +332,7 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       let server: T;
 
-      const body = await getBody(req);
+      body = await getBody(req);
 
       // Per-request authentication in stateless mode
       if (stateless && authenticate) {
@@ -566,6 +591,19 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       return true;
     } catch (error) {
+      // Check for scope challenge errors
+      if (isScopeChallengeError(error)) {
+        const response = authMiddleware.getScopeChallengeResponse(
+          error.data.requiredScopes,
+          error.data.errorDescription,
+          (body as { id?: unknown })?.id,
+        );
+
+        res.writeHead(response.statusCode, response.headers);
+        res.end(response.body);
+        return true;
+      }
+
       console.error("[mcp-proxy] error handling request", error);
 
       res.setHeader("Content-Type", "application/json");
@@ -858,6 +896,7 @@ export const startHTTPServer = async <T extends ServerLike>({
       (await handleStreamRequest({
         activeTransports: activeStreamTransports,
         authenticate,
+        authMiddleware,
         createServer,
         enableJsonResponse,
         endpoint: streamEndpoint,
