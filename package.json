@@ -55,11 +55,11 @@
     "jsr": "^0.13.5",
     "prettier": "^3.7.4",
     "semantic-release": "^24.2.9",
-    "tsdown": "^0.15.12",
+    "tsdown": "^0.17.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.1",
-    "vitest": "^3.2.4",
+    "vitest": "^4.0.15",
     "yargs": "^18.0.0"
   },
   "tsdown": {
