@@ -1,14 +1,14 @@
 {
   "name": "mcp-proxy",
   "version": "1.0.0",
-  "main": "dist/index.js",
+  "main": "dist/index.mjs",
   "scripts": {
     "build": "tsdown",
     "test": "vitest run && tsc && eslint . && jsr publish --dry-run --allow-dirty",
     "format": "eslint --fix ."
   },
   "bin": {
-    "mcp-proxy": "dist/bin/mcp-proxy.js"
+    "mcp-proxy": "dist/bin/mcp-proxy.mjs"
   },
   "keywords": [
     "MCP",
@@ -19,7 +19,7 @@
   "author": "Frank Fiegel <frank@glama.ai>",
   "license": "MIT",
   "description": "A TypeScript SSE proxy for MCP servers that use stdio transport.",
-  "module": "dist/index.js",
+  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "repository": {
     "url": "https://github.com/punkpeye/mcp-proxy"
