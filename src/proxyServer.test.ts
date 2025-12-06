@@ -28,33 +28,47 @@ interface TestEnvironment {
   streamClient: Client;
 }
 
-async function createTestEnvironment(config: TestConfig = {}): Promise<TestEnvironment> {
-  const { 
-    requestTimeout, 
-    serverDelay, 
-    serverFixture = "simple-stdio-server.ts" 
+async function createTestEnvironment(
+  config: TestConfig = {},
+): Promise<TestEnvironment> {
+  const {
+    requestTimeout,
+    serverDelay,
+    serverFixture = "simple-stdio-server.ts",
   } = config;
-  
+
   const stdioTransport = new StdioClientTransport({
     args: [`src/fixtures/${serverFixture}`],
     command: "tsx",
-    env: serverDelay ? { ...process.env, RESPONSE_DELAY: serverDelay } as Record<string, string> : process.env as Record<string, string>,
+    env: serverDelay
+      ? ({ ...process.env, RESPONSE_DELAY: serverDelay } as Record<
+          string,
+          string
+        >)
+      : (process.env as Record<string, string>),
   });
 
   const stdioClient = new Client(
     { name: "mcp-proxy-test", version: "1.0.0" },
-    { capabilities: {} }
+    { capabilities: {} },
   );
 
   await stdioClient.connect(stdioTransport);
 
-  const serverVersion = stdioClient.getServerVersion() as { name: string; version: string };
-  const serverCapabilities = stdioClient.getServerCapabilities() as { capabilities: Record<string, unknown> };
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
   const port = await getRandomPort();
 
   const httpServer = await startHTTPServer({
     createServer: async () => {
-      const mcpServer = new Server(serverVersion, { capabilities: serverCapabilities });
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
       await proxyServer({
         client: stdioClient,
         requestTimeout,
@@ -68,20 +82,22 @@ async function createTestEnvironment(config: TestConfig = {}): Promise<TestEnvir
 
   const streamClient = new Client(
     { name: "stream-client", version: "1.0.0" },
-    { capabilities: {} }
+    { capabilities: {} },
   );
 
-  const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`));
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/mcp`),
+  );
   await streamClient.connect(transport);
 
-  return { 
+  return {
     cleanup: async () => {
       await streamClient.close();
       await stdioClient.close();
-    }, 
-    httpServer, 
-    stdioClient, 
-    streamClient
+    },
+    httpServer,
+    stdioClient,
+    streamClient,
   };
 }
 
@@ -90,7 +106,7 @@ describe("proxyServer timeout functionality", () => {
     const { cleanup, streamClient } = await createTestEnvironment({
       requestTimeout: 1000,
       serverDelay: "500",
-      serverFixture: "slow-stdio-server.ts"
+      serverFixture: "slow-stdio-server.ts",
     });
 
     // This should succeed as timeout (1s) > delay (500ms)
@@ -105,7 +121,7 @@ describe("proxyServer timeout functionality", () => {
     const { cleanup, streamClient } = await createTestEnvironment({
       requestTimeout: 500,
       serverDelay: "1000",
-      serverFixture: "slow-stdio-server.ts"
+      serverFixture: "slow-stdio-server.ts",
     });
 
     // This should throw a timeout error as delay (1s) > timeout (500ms)
@@ -128,7 +144,7 @@ describe("proxyServer timeout functionality", () => {
     const { cleanup, streamClient } = await createTestEnvironment({
       requestTimeout: 600,
       serverDelay: "300",
-      serverFixture: "slow-stdio-server.ts"
+      serverFixture: "slow-stdio-server.ts",
     });
 
     // First get the resources
@@ -141,7 +157,9 @@ describe("proxyServer timeout functionality", () => {
     });
 
     expect(resourceContent.contents).toBeDefined();
-    expect(resourceContent.contents[0].text).toContain("300ms delay");
+    expect((resourceContent.contents[0] as { text: string }).text).toContain(
+      "300ms delay",
+    );
 
     await cleanup();
   }, 10000);

@@ -1339,8 +1339,8 @@ it("returns 401 with custom error message when { authenticated: false, error: '.
       },
     }),
     headers: {
-      "Accept": "application/json, text/event-stream",
-      "Authorization": "Bearer expired-token",
+      Accept: "application/json, text/event-stream",
+      Authorization: "Bearer expired-token",
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1408,8 +1408,8 @@ it("returns 401 when createServer throws authentication error", async () => {
       },
     }),
     headers: {
-      "Accept": "application/json, text/event-stream",
-      "Authorization": "Bearer test-token",
+      Accept: "application/json, text/event-stream",
+      Authorization: "Bearer test-token",
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1451,7 +1451,7 @@ it("returns 401 when createServer throws JWT-related error", async () => {
       },
     }),
     headers: {
-      "Accept": "application/json, text/event-stream",
+      Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1492,7 +1492,7 @@ it("returns 401 when createServer throws Token-related error", async () => {
       },
     }),
     headers: {
-      "Accept": "application/json, text/event-stream",
+      Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1533,7 +1533,7 @@ it("returns 401 when createServer throws Unauthorized error", async () => {
       },
     }),
     headers: {
-      "Accept": "application/json, text/event-stream",
+      Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1574,7 +1574,7 @@ it("returns 500 when createServer throws non-auth error", async () => {
       },
     }),
     headers: {
-      "Accept": "application/json, text/event-stream",
+      Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1614,7 +1614,7 @@ it("includes WWW-Authenticate header in 401 response with OAuth config", async (
       },
     }),
     headers: {
-      "Accept": "application/json, text/event-stream",
+      Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1624,9 +1624,11 @@ it("includes WWW-Authenticate header in 401 response with OAuth config", async (
 
   const wwwAuthHeader = response.headers.get("WWW-Authenticate");
   expect(wwwAuthHeader).toBeTruthy();
-  expect(wwwAuthHeader).toContain('Bearer');
+  expect(wwwAuthHeader).toContain("Bearer");
   expect(wwwAuthHeader).toContain('realm="mcp-server"');
-  expect(wwwAuthHeader).toContain('resource_metadata="https://example.com/.well-known/oauth-protected-resource"');
+  expect(wwwAuthHeader).toContain(
+    'resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+  );
   expect(wwwAuthHeader).toContain('error="invalid_token"');
   expect(wwwAuthHeader).toContain('error_description="Invalid JWT token"');
 
@@ -1636,7 +1638,9 @@ it("includes WWW-Authenticate header in 401 response with OAuth config", async (
 it("includes WWW-Authenticate header when authenticate callback fails with OAuth", async () => {
   const port = await getRandomPort();
 
-  const authenticate = vi.fn().mockRejectedValue(new Error("Token signature verification failed"));
+  const authenticate = vi
+    .fn()
+    .mockRejectedValue(new Error("Token signature verification failed"));
 
   const httpServer = await startHTTPServer({
     authenticate,
@@ -1670,8 +1674,8 @@ it("includes WWW-Authenticate header when authenticate callback fails with OAuth
       },
     }),
     headers: {
-      "Accept": "application/json, text/event-stream",
-      "Authorization": "Bearer expired-token",
+      Accept: "application/json, text/event-stream",
+      Authorization: "Bearer expired-token",
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1682,12 +1686,18 @@ it("includes WWW-Authenticate header when authenticate callback fails with OAuth
 
   const wwwAuthHeader = response.headers.get("WWW-Authenticate");
   expect(wwwAuthHeader).toBeTruthy();
-  expect(wwwAuthHeader).toContain('Bearer');
+  expect(wwwAuthHeader).toContain("Bearer");
   expect(wwwAuthHeader).toContain('realm="example-api"');
-  expect(wwwAuthHeader).toContain('resource_metadata="https://api.example.com/.well-known/oauth-protected-resource"');
+  expect(wwwAuthHeader).toContain(
+    'resource_metadata="https://api.example.com/.well-known/oauth-protected-resource"',
+  );
   expect(wwwAuthHeader).toContain('error="invalid_token"');
-  expect(wwwAuthHeader).toContain('error_description="Token signature verification failed"');
-  expect(wwwAuthHeader).toContain('error_uri="https://example.com/docs/errors"');
+  expect(wwwAuthHeader).toContain(
+    'error_description="Token signature verification failed"',
+  );
+  expect(wwwAuthHeader).toContain(
+    'error_uri="https://example.com/docs/errors"',
+  );
 
   await httpServer.close();
 });
@@ -1715,7 +1725,7 @@ it("does not include WWW-Authenticate header in 401 response without OAuth confi
       },
     }),
     headers: {
-      "Accept": "application/json, text/event-stream",
+      Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -1916,7 +1926,9 @@ it("supports origin validation with array", async () => {
   });
 
   expect(response1.status).toBe(204);
-  expect(response1.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+  expect(response1.headers.get("Access-Control-Allow-Origin")).toBe(
+    "https://app.example.com",
+  );
 
   // Test with disallowed origin
   const response2 = await fetch(`http://localhost:${port}/mcp`, {
@@ -1958,7 +1970,9 @@ it("supports origin validation with function", async () => {
   });
 
   expect(response1.status).toBe(204);
-  expect(response1.headers.get("Access-Control-Allow-Origin")).toBe("https://subdomain.example.com");
+  expect(response1.headers.get("Access-Control-Allow-Origin")).toBe(
+    "https://subdomain.example.com",
+  );
 
   // Test with disallowed origin
   const response2 = await fetch(`http://localhost:${port}/mcp`, {
@@ -2029,7 +2043,9 @@ it("uses default CORS settings when cors: true", async () => {
 
   expect(response.status).toBe(204);
   expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
-  expect(response.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id");
+  expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
+    "Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id",
+  );
   expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
 
   await httpServer.close();
@@ -2062,7 +2078,9 @@ it("supports custom methods and maxAge", async () => {
   });
 
   expect(response.status).toBe(204);
-  expect(response.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, PUT, DELETE");
+  expect(response.headers.get("Access-Control-Allow-Methods")).toBe(
+    "GET, POST, PUT, DELETE",
+  );
   expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
 
   await httpServer.close();

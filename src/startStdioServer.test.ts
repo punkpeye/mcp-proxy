@@ -19,9 +19,8 @@ describe("startStdioServer.test.ts", () => {
   let proc: ChildProcess;
 
   beforeEach(async () => {
-    const serverPath = require.resolve(
-      "@modelcontextprotocol/sdk/examples/server/sseAndStreamableHttpCompatibleServer.js",
-    );
+    const serverPath =
+      require.resolve("@modelcontextprotocol/sdk/examples/server/sseAndStreamableHttpCompatibleServer.js");
     proc = fork(serverPath, [], {
       stdio: "pipe",
     });
@@ -83,9 +82,11 @@ describe("startStdioServer.test.ts", () => {
         {
           description:
             "Starts sending periodic notifications for testing resumability",
+          execution: {
+            taskSupport: "forbidden",
+          },
           inputSchema: {
             $schema: "http://json-schema.org/draft-07/schema#",
-            additionalProperties: false,
             properties: {
               count: {
                 default: 50,
@@ -177,9 +178,11 @@ describe("startStdioServer.test.ts", () => {
         {
           description:
             "Starts sending periodic notifications for testing resumability",
+          execution: {
+            taskSupport: "forbidden",
+          },
           inputSchema: {
             $schema: "http://json-schema.org/draft-07/schema#",
-            additionalProperties: false,
             properties: {
               count: {
                 default: 50,

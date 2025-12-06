@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import { AuthenticationMiddleware } from "./authentication.js";
 
 describe("AuthenticationMiddleware", () => {
-  const createMockRequest = (headers: Record<string, string> = {}): IncomingMessage => {
+  const createMockRequest = (
+    headers: Record<string, string> = {},
+  ): IncomingMessage => {
     // Simulate Node.js http module behavior which converts all header names to lowercase
     const lowercaseHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(headers)) {
@@ -98,7 +100,9 @@ describe("AuthenticationMiddleware", () => {
 
       const body = JSON.parse(response.body);
       expect(body.error.code).toBe(401);
-      expect(body.error.message).toBe("Unauthorized: Invalid or missing API key");
+      expect(body.error.message).toBe(
+        "Unauthorized: Invalid or missing API key",
+      );
       expect(body.jsonrpc).toBe("2.0");
       expect(body.id).toBe(null);
     });
@@ -207,8 +211,12 @@ describe("AuthenticationMiddleware", () => {
       });
       const response = middleware.getUnauthorizedResponse();
 
-      expect(response.headers["WWW-Authenticate"]).toContain('realm="example-realm"');
-      expect(response.headers["WWW-Authenticate"]).toContain('resource_metadata="https://example.com/.well-known/oauth-protected-resource"');
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'realm="example-realm"',
+      );
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+      );
     });
 
     it("should include custom error in WWW-Authenticate header via options", () => {
@@ -225,8 +233,12 @@ describe("AuthenticationMiddleware", () => {
         error_description: "The request requires higher privileges",
       });
 
-      expect(response.headers["WWW-Authenticate"]).toContain('error="insufficient_scope"');
-      expect(response.headers["WWW-Authenticate"]).toContain('error_description="The request requires higher privileges"');
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'error="insufficient_scope"',
+      );
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'error_description="The request requires higher privileges"',
+      );
     });
 
     it("should include scope in WWW-Authenticate header", () => {
@@ -241,7 +253,9 @@ describe("AuthenticationMiddleware", () => {
       });
       const response = middleware.getUnauthorizedResponse();
 
-      expect(response.headers["WWW-Authenticate"]).toContain('scope="read write"');
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'scope="read write"',
+      );
     });
 
     it("should override config error with options error", () => {
@@ -260,10 +274,18 @@ describe("AuthenticationMiddleware", () => {
         error_description: "Options error description",
       });
 
-      expect(response.headers["WWW-Authenticate"]).toContain('error="invalid_token"');
-      expect(response.headers["WWW-Authenticate"]).toContain('error_description="Options error description"');
-      expect(response.headers["WWW-Authenticate"]).not.toContain("invalid_request");
-      expect(response.headers["WWW-Authenticate"]).not.toContain("Config error description");
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'error="invalid_token"',
+      );
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'error_description="Options error description"',
+      );
+      expect(response.headers["WWW-Authenticate"]).not.toContain(
+        "invalid_request",
+      );
+      expect(response.headers["WWW-Authenticate"]).not.toContain(
+        "Config error description",
+      );
     });
 
     it("should include error_uri in WWW-Authenticate header", () => {
@@ -278,7 +300,9 @@ describe("AuthenticationMiddleware", () => {
       });
       const response = middleware.getUnauthorizedResponse();
 
-      expect(response.headers["WWW-Authenticate"]).toContain('error_uri="https://example.com/errors/auth"');
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'error_uri="https://example.com/errors/auth"',
+      );
     });
 
     it("should properly escape quotes in error_description", () => {
@@ -294,7 +318,9 @@ describe("AuthenticationMiddleware", () => {
         error_description: 'Token "abc123" is invalid',
       });
 
-      expect(response.headers["WWW-Authenticate"]).toContain('error_description="Token \\"abc123\\" is invalid"');
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'error_description="Token \\"abc123\\" is invalid"',
+      );
     });
 
     it("should include all parameters in correct order", () => {
@@ -315,16 +341,24 @@ describe("AuthenticationMiddleware", () => {
 
       const header = response.headers["WWW-Authenticate"];
       expect(header).toContain('realm="my-realm"');
-      expect(header).toContain('resource_metadata="https://example.com/.well-known/oauth-protected-resource"');
+      expect(header).toContain(
+        'resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+      );
       expect(header).toContain('error="invalid_token"');
       expect(header).toContain('error_description="Token expired"');
       expect(header).toContain('error_uri="https://example.com/errors"');
       expect(header).toContain('scope="read write"');
 
       // Check order: realm, resource_metadata, error, error_description, error_uri, scope
-      expect(header.indexOf('realm=')).toBeLessThan(header.indexOf('resource_metadata='));
-      expect(header.indexOf('resource_metadata=')).toBeLessThan(header.indexOf('error='));
-      expect(header.indexOf('error=')).toBeLessThan(header.indexOf('error_description='));
+      expect(header.indexOf("realm=")).toBeLessThan(
+        header.indexOf("resource_metadata="),
+      );
+      expect(header.indexOf("resource_metadata=")).toBeLessThan(
+        header.indexOf("error="),
+      );
+      expect(header.indexOf("error=")).toBeLessThan(
+        header.indexOf("error_description="),
+      );
     });
   });
 
@@ -352,9 +386,15 @@ describe("AuthenticationMiddleware", () => {
       });
       const response = middleware.getScopeChallengeResponse(["read", "write"]);
 
-      expect(response.headers["WWW-Authenticate"]).toContain('error="insufficient_scope"');
-      expect(response.headers["WWW-Authenticate"]).toContain('scope="read write"');
-      expect(response.headers["WWW-Authenticate"]).toContain('resource_metadata="https://example.com/.well-known/oauth-protected-resource"');
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'error="insufficient_scope"',
+      );
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'scope="read write"',
+      );
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+      );
     });
 
     it("should include error_description in WWW-Authenticate header", () => {
@@ -370,7 +410,9 @@ describe("AuthenticationMiddleware", () => {
         "Admin access required",
       );
 
-      expect(response.headers["WWW-Authenticate"]).toContain('error_description="Admin access required"');
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'error_description="Admin access required"',
+      );
     });
 
     it("should escape quotes in error_description", () => {
@@ -386,7 +428,9 @@ describe("AuthenticationMiddleware", () => {
         'Requires "admin" scope',
       );
 
-      expect(response.headers["WWW-Authenticate"]).toContain('error_description="Requires \\"admin\\" scope"');
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'error_description="Requires \\"admin\\" scope"',
+      );
     });
 
     it("should include request ID in response body", () => {
@@ -397,7 +441,11 @@ describe("AuthenticationMiddleware", () => {
           },
         },
       });
-      const response = middleware.getScopeChallengeResponse(["read"], undefined, 123);
+      const response = middleware.getScopeChallengeResponse(
+        ["read"],
+        undefined,
+        123,
+      );
 
       const body = JSON.parse(response.body);
       expect(body.id).toBe(123);
@@ -460,11 +508,21 @@ describe("AuthenticationMiddleware", () => {
           },
         },
       });
-      const response = middleware.getScopeChallengeResponse(["read", "write", "admin"]);
+      const response = middleware.getScopeChallengeResponse([
+        "read",
+        "write",
+        "admin",
+      ]);
 
-      expect(response.headers["WWW-Authenticate"]).toContain('scope="read write admin"');
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'scope="read write admin"',
+      );
       const body = JSON.parse(response.body);
-      expect(body.error.data.required_scopes).toEqual(["read", "write", "admin"]);
+      expect(body.error.data.required_scopes).toEqual([
+        "read",
+        "write",
+        "admin",
+      ]);
     });
 
     it("should not include WWW-Authenticate header without OAuth config", () => {
@@ -483,7 +541,11 @@ describe("AuthenticationMiddleware", () => {
           },
         },
       });
-      const response = middleware.getScopeChallengeResponse(["read"], "Description", "req-123");
+      const response = middleware.getScopeChallengeResponse(
+        ["read"],
+        "Description",
+        "req-123",
+      );
 
       const body = JSON.parse(response.body);
       expect(body.jsonrpc).toBe("2.0");

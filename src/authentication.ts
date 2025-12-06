@@ -83,15 +83,21 @@ export class AuthenticationMiddleware {
 
       // Add resource_metadata if configured
       if (this.config.oauth.protectedResource?.resource) {
-        params.push(`resource_metadata="${this.config.oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`);
+        params.push(
+          `resource_metadata="${this.config.oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`,
+        );
       }
 
       // Add error from options or config (options takes precedence)
-      const error = options?.error || this.config.oauth.error || "invalid_token";
+      const error =
+        options?.error || this.config.oauth.error || "invalid_token";
       params.push(`error="${error}"`);
 
       // Add error_description from options or config (options takes precedence)
-      const error_description = options?.error_description || this.config.oauth.error_description || "Unauthorized: Invalid or missing API key";
+      const error_description =
+        options?.error_description ||
+        this.config.oauth.error_description ||
+        "Unauthorized: Invalid or missing API key";
       // Escape quotes in error description
       const escaped = error_description.replace(/"/g, '\\"');
       params.push(`error_description="${escaped}"`);
@@ -117,7 +123,9 @@ export class AuthenticationMiddleware {
       body: JSON.stringify({
         error: {
           code: 401,
-          message: options?.error_description || "Unauthorized: Invalid or missing API key",
+          message:
+            options?.error_description ||
+            "Unauthorized: Invalid or missing API key",
         },
         id: null,
         jsonrpc: "2.0",
@@ -143,4 +151,3 @@ export class AuthenticationMiddleware {
     return apiKey === this.config.apiKey;
   }
 }
-

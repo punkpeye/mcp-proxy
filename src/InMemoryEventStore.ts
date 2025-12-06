@@ -81,13 +81,12 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /**
-   * Generates a monotonic unique event ID in 
+   * Generates a monotonic unique event ID in
    * `${streamId}_${timestamp}_${counter}_${random}` format.
    */
   private generateEventId(streamId: string): string {
-
     const now = Date.now();
-    
+
     if (now === this.lastTimestamp) {
       this.lastTimestampCounter++;
     } else {

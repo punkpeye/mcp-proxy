@@ -56,7 +56,7 @@ npx mcp-proxy --port 8080 -- my-command -v
 
 ### Stateless Mode
 
-By default, MCP Proxy maintains persistent sessions for HTTP streamable transport, where each client connection is associated with a server instance that stays alive for the duration of the session. 
+By default, MCP Proxy maintains persistent sessions for HTTP streamable transport, where each client connection is associated with a server instance that stays alive for the duration of the session.
 
 Stateless mode (`--stateless`) changes this behavior:
 
@@ -94,11 +94,13 @@ MCP Proxy supports optional API key authentication to secure your endpoints. Whe
 Authentication is disabled by default for backward compatibility. To enable it, provide an API key via:
 
 **Command-line:**
+
 ```bash
 npx mcp-proxy --port 8080 --apiKey "your-secret-key" tsx server.js
 ```
 
 **Environment variable:**
+
 ```bash
 export MCP_PROXY_API_KEY="your-secret-key"
 npx mcp-proxy --port 8080 tsx server.js
@@ -111,28 +113,26 @@ Clients must include the API key in the `X-API-Key` header:
 ```typescript
 // For streamable HTTP transport
 const transport = new StreamableHTTPClientTransport(
-  new URL('http://localhost:8080/mcp'),
+  new URL("http://localhost:8080/mcp"),
   {
     headers: {
-      'X-API-Key': 'your-secret-key'
-    }
-  }
+      "X-API-Key": "your-secret-key",
+    },
+  },
 );
 
 // For SSE transport
-const transport = new SSEClientTransport(
-  new URL('http://localhost:8080/sse'),
-  {
-    headers: {
-      'X-API-Key': 'your-secret-key'
-    }
-  }
-);
+const transport = new SSEClientTransport(new URL("http://localhost:8080/sse"), {
+  headers: {
+    "X-API-Key": "your-secret-key",
+  },
+});
 ```
 
 #### Exempt Endpoints
 
 The following endpoints do not require authentication:
+
 - `/ping` - Health check endpoint
 - `OPTIONS` requests - CORS preflight requests
 
@@ -150,6 +150,7 @@ MCP Proxy provides flexible CORS (Cross-Origin Resource Sharing) configuration t
 #### Default Behavior
 
 By default, CORS is enabled with the following settings:
+
 - **Origin**: `*` (allow all origins)
 - **Methods**: `GET, POST, OPTIONS`
 - **Headers**: `Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id`
@@ -159,24 +160,30 @@ By default, CORS is enabled with the following settings:
 #### Basic Configuration
 
 ```typescript
-import { startHTTPServer } from 'mcp-proxy';
+import { startHTTPServer } from "mcp-proxy";
 
 // Use default CORS settings (backward compatible)
 await startHTTPServer({
-  createServer: async () => { /* ... */ },
+  createServer: async () => {
+    /* ... */
+  },
   port: 3000,
 });
 
 // Explicitly enable default CORS
 await startHTTPServer({
-  createServer: async () => { /* ... */ },
+  createServer: async () => {
+    /* ... */
+  },
   port: 3000,
   cors: true,
 });
 
 // Disable CORS completely
 await startHTTPServer({
-  createServer: async () => { /* ... */ },
+  createServer: async () => {
+    /* ... */
+  },
   port: 3000,
   cors: false,
 });
@@ -187,44 +194,46 @@ await startHTTPServer({
 For more control over CORS behavior, you can provide a detailed configuration:
 
 ```typescript
-import { startHTTPServer, CorsOptions } from 'mcp-proxy';
+import { startHTTPServer, CorsOptions } from "mcp-proxy";
 
 const corsOptions: CorsOptions = {
   // Allow specific origins
-  origin: ['https://app.example.com', 'https://admin.example.com'],
-  
+  origin: ["https://app.example.com", "https://admin.example.com"],
+
   // Or use a function for dynamic origin validation
-  origin: (origin: string) => origin.endsWith('.example.com'),
-  
+  origin: (origin: string) => origin.endsWith(".example.com"),
+
   // Specify allowed methods
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+
   // Allow any headers (useful for browser clients with custom headers)
-  allowedHeaders: '*',
-  
+  allowedHeaders: "*",
+
   // Or specify exact headers
   allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'Accept',
-    'Mcp-Session-Id',
-    'Last-Event-Id',
-    'X-Custom-Header',
-    'X-API-Key'
+    "Content-Type",
+    "Authorization",
+    "Accept",
+    "Mcp-Session-Id",
+    "Last-Event-Id",
+    "X-Custom-Header",
+    "X-API-Key",
   ],
-  
+
   // Headers to expose to the client
-  exposedHeaders: ['Mcp-Session-Id', 'X-Total-Count'],
-  
+  exposedHeaders: ["Mcp-Session-Id", "X-Total-Count"],
+
   // Allow credentials
   credentials: true,
-  
+
   // Cache preflight requests for 24 hours
   maxAge: 86400,
 };
 
 await startHTTPServer({
-  createServer: async () => { /* ... */ },
+  createServer: async () => {
+    /* ... */
+  },
   port: 3000,
   cors: corsOptions,
 });
@@ -233,36 +242,45 @@ await startHTTPServer({
 #### Common Use Cases
 
 **Allow any custom headers (solves browser CORS issues):**
+
 ```typescript
 await startHTTPServer({
-  createServer: async () => { /* ... */ },
+  createServer: async () => {
+    /* ... */
+  },
   port: 3000,
   cors: {
-    allowedHeaders: '*', // Allows X-Custom-Header, X-API-Key, etc.
+    allowedHeaders: "*", // Allows X-Custom-Header, X-API-Key, etc.
   },
 });
 ```
 
 **Restrict to specific domains:**
+
 ```typescript
 await startHTTPServer({
-  createServer: async () => { /* ... */ },
+  createServer: async () => {
+    /* ... */
+  },
   port: 3000,
   cors: {
-    origin: ['https://myapp.com', 'https://admin.myapp.com'],
-    allowedHeaders: '*',
+    origin: ["https://myapp.com", "https://admin.myapp.com"],
+    allowedHeaders: "*",
   },
 });
 ```
 
 **Development-friendly settings:**
+
 ```typescript
 await startHTTPServer({
-  createServer: async () => { /* ... */ },
+  createServer: async () => {
+    /* ... */
+  },
   port: 3000,
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:5173'], // Common dev ports
-    allowedHeaders: '*',
+    origin: ["http://localhost:3000", "http://localhost:5173"], // Common dev ports
+    allowedHeaders: "*",
     credentials: true,
   },
 });
@@ -275,16 +293,20 @@ If you were using mcp-proxy 5.5.6 and want the same permissive behavior in 5.9.0
 ```typescript
 // Old behavior (5.5.6) - automatic wildcard headers
 await startHTTPServer({
-  createServer: async () => { /* ... */ },
+  createServer: async () => {
+    /* ... */
+  },
   port: 3000,
 });
 
 // New equivalent (5.9.0+) - explicit wildcard headers
 await startHTTPServer({
-  createServer: async () => { /* ... */ },
+  createServer: async () => {
+    /* ... */
+  },
   port: 3000,
   cors: {
-    allowedHeaders: '*',
+    allowedHeaders: "*",
   },
 });
 ```

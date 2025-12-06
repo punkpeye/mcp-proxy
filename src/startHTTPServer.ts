@@ -81,7 +81,9 @@ const getWWWAuthenticateHeader = (
 
   // Add resource_metadata if configured
   if (oauth.protectedResource?.resource) {
-    params.push(`resource_metadata="${oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`);
+    params.push(
+      `resource_metadata="${oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`,
+    );
   }
 
   // Add error from options or config (options takes precedence)
@@ -91,7 +93,8 @@ const getWWWAuthenticateHeader = (
   }
 
   // Add error_description from options or config (options takes precedence)
-  const error_description = options?.error_description || oauth.error_description;
+  const error_description =
+    options?.error_description || oauth.error_description;
   if (error_description) {
     // Escape quotes in error description
     const escaped = error_description.replace(/"/g, '\\"');
@@ -119,7 +122,9 @@ const getWWWAuthenticateHeader = (
 };
 
 // Helper function to detect scope challenge errors
-const isScopeChallengeError = (error: unknown): error is {
+const isScopeChallengeError = (
+  error: unknown,
+): error is {
   data: {
     error: string;
     errorDescription?: string;
@@ -147,11 +152,12 @@ const handleResponseError = async (
 ): Promise<boolean> => {
   // Check if it's a Response-like object (duck typing)
   // The instanceof check may fail due to different Response implementations across module boundaries
-  const isResponseLike = error &&
-    typeof error === 'object' &&
-    'status' in error &&
-    'headers' in error &&
-    'statusText' in error;
+  const isResponseLike =
+    error &&
+    typeof error === "object" &&
+    "status" in error &&
+    "headers" in error &&
+    "statusText" in error;
 
   if (isResponseLike || error instanceof Response) {
     const responseError = error as Response;
@@ -210,7 +216,8 @@ const applyCorsHeaders = (
 
   // Default CORS configuration for backward compatibility
   const defaultCorsOptions: CorsOptions = {
-    allowedHeaders: "Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id",
+    allowedHeaders:
+      "Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id",
     credentials: true,
     exposedHeaders: ["Mcp-Session-Id"],
     methods: ["GET", "POST", "OPTIONS"],
@@ -246,7 +253,9 @@ const applyCorsHeaders = (
           ? origin.origin
           : "false";
       } else if (typeof finalCorsOptions.origin === "function") {
-        allowedOrigin = finalCorsOptions.origin(origin.origin) ? origin.origin : "false";
+        allowedOrigin = finalCorsOptions.origin(origin.origin)
+          ? origin.origin
+          : "false";
       }
     }
 
@@ -256,30 +265,43 @@ const applyCorsHeaders = (
 
     // Handle credentials
     if (finalCorsOptions.credentials !== undefined) {
-      res.setHeader("Access-Control-Allow-Credentials", finalCorsOptions.credentials.toString());
+      res.setHeader(
+        "Access-Control-Allow-Credentials",
+        finalCorsOptions.credentials.toString(),
+      );
     }
 
     // Handle methods
     if (finalCorsOptions.methods) {
-      res.setHeader("Access-Control-Allow-Methods", finalCorsOptions.methods.join(", "));
+      res.setHeader(
+        "Access-Control-Allow-Methods",
+        finalCorsOptions.methods.join(", "),
+      );
     }
 
     // Handle allowed headers
     if (finalCorsOptions.allowedHeaders) {
-      const allowedHeaders = typeof finalCorsOptions.allowedHeaders === "string"
-        ? finalCorsOptions.allowedHeaders
-        : finalCorsOptions.allowedHeaders.join(", ");
+      const allowedHeaders =
+        typeof finalCorsOptions.allowedHeaders === "string"
+          ? finalCorsOptions.allowedHeaders
+          : finalCorsOptions.allowedHeaders.join(", ");
       res.setHeader("Access-Control-Allow-Headers", allowedHeaders);
     }
 
     // Handle exposed headers
     if (finalCorsOptions.exposedHeaders) {
-      res.setHeader("Access-Control-Expose-Headers", finalCorsOptions.exposedHeaders.join(", "));
+      res.setHeader(
+        "Access-Control-Expose-Headers",
+        finalCorsOptions.exposedHeaders.join(", "),
+      );
     }
 
     // Handle max age
     if (finalCorsOptions.maxAge !== undefined) {
-      res.setHeader("Access-Control-Max-Age", finalCorsOptions.maxAge.toString());
+      res.setHeader(
+        "Access-Control-Max-Age",
+        finalCorsOptions.maxAge.toString(),
+      );
     }
   } catch (error) {
     console.error("[mcp-proxy] error parsing origin", error);
@@ -340,10 +362,18 @@ const handleStreamRequest = async <T extends ServerLike>({
           const authResult = await authenticate(req);
 
           // Check for both falsy AND { authenticated: false } pattern
-          if (!authResult || (typeof authResult === 'object' && 'authenticated' in authResult && !authResult.authenticated)) {
+          if (
+            !authResult ||
+            (typeof authResult === "object" &&
+              "authenticated" in authResult &&
+              !authResult.authenticated)
+          ) {
             // Extract error message if available
             const errorMessage =
-              authResult && typeof authResult === 'object' && 'error' in authResult && typeof authResult.error === 'string'
+              authResult &&
+              typeof authResult === "object" &&
+              "error" in authResult &&
+              typeof authResult.error === "string"
                 ? authResult.error
                 : "Unauthorized: Authentication failed";
 
@@ -362,11 +392,11 @@ const handleStreamRequest = async <T extends ServerLike>({
               JSON.stringify({
                 error: {
                   code: -32000,
-                  message: errorMessage
+                  message: errorMessage,
                 },
                 id: (body as { id?: unknown })?.id ?? null,
-                jsonrpc: "2.0"
-              })
+                jsonrpc: "2.0",
+              }),
             );
             return true;
           }
@@ -377,7 +407,10 @@ const handleStreamRequest = async <T extends ServerLike>({
           }
 
           // Extract error details from thrown errors
-          const errorMessage = error instanceof Error ? error.message : "Unauthorized: Authentication error";
+          const errorMessage =
+            error instanceof Error
+              ? error.message
+              : "Unauthorized: Authentication error";
           console.error("Authentication error:", error);
           res.setHeader("Content-Type", "application/json");
 
@@ -394,11 +427,11 @@ const handleStreamRequest = async <T extends ServerLike>({
             JSON.stringify({
               error: {
                 code: -32000,
-                message: errorMessage
+                message: errorMessage,
               },
               id: (body as { id?: unknown })?.id ?? null,
-              jsonrpc: "2.0"
-            })
+              jsonrpc: "2.0",
+            }),
           );
           return true;
         }
@@ -464,11 +497,13 @@ const handleStreamRequest = async <T extends ServerLike>({
           }
 
           // Detect authentication errors and return HTTP 401
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          const isAuthError = errorMessage.includes('Authentication') ||
-                             errorMessage.includes('Invalid JWT') ||
-                             errorMessage.includes('Token') ||
-                             errorMessage.includes('Unauthorized');
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          const isAuthError =
+            errorMessage.includes("Authentication") ||
+            errorMessage.includes("Invalid JWT") ||
+            errorMessage.includes("Token") ||
+            errorMessage.includes("Unauthorized");
 
           if (isAuthError) {
             res.setHeader("Content-Type", "application/json");
@@ -482,14 +517,16 @@ const handleStreamRequest = async <T extends ServerLike>({
               res.setHeader("WWW-Authenticate", wwwAuthHeader);
             }
 
-            res.writeHead(401).end(JSON.stringify({
-              error: {
-                code: -32000,
-                message: errorMessage
-              },
-              id: (body as { id?: unknown })?.id ?? null,
-              jsonrpc: "2.0"
-            }));
+            res.writeHead(401).end(
+              JSON.stringify({
+                error: {
+                  code: -32000,
+                  message: errorMessage,
+                },
+                id: (body as { id?: unknown })?.id ?? null,
+                jsonrpc: "2.0",
+              }),
+            );
             return true;
           }
 
@@ -527,11 +564,13 @@ const handleStreamRequest = async <T extends ServerLike>({
           }
 
           // Detect authentication errors and return HTTP 401
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          const isAuthError = errorMessage.includes('Authentication') ||
-                             errorMessage.includes('Invalid JWT') ||
-                             errorMessage.includes('Token') ||
-                             errorMessage.includes('Unauthorized');
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          const isAuthError =
+            errorMessage.includes("Authentication") ||
+            errorMessage.includes("Invalid JWT") ||
+            errorMessage.includes("Token") ||
+            errorMessage.includes("Unauthorized");
 
           if (isAuthError) {
             res.setHeader("Content-Type", "application/json");
@@ -545,14 +584,16 @@ const handleStreamRequest = async <T extends ServerLike>({
               res.setHeader("WWW-Authenticate", wwwAuthHeader);
             }
 
-            res.writeHead(401).end(JSON.stringify({
-              error: {
-                code: -32000,
-                message: errorMessage
-              },
-              id: (body as { id?: unknown })?.id ?? null,
-              jsonrpc: "2.0"
-            }));
+            res.writeHead(401).end(
+              JSON.stringify({
+                error: {
+                  code: -32000,
+                  message: errorMessage,
+                },
+                id: (body as { id?: unknown })?.id ?? null,
+                jsonrpc: "2.0",
+              }),
+            );
             return true;
           }
 

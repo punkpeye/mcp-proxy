@@ -68,7 +68,8 @@ const argv = await yargs(hideBin(process.argv))
     },
     requestTimeout: {
       default: 300000,
-      describe: "The timeout (in milliseconds) for requests to the MCP server (default: 5 minutes)",
+      describe:
+        "The timeout (in milliseconds) for requests to the MCP server (default: 5 minutes)",
       type: "number",
     },
     server: {
