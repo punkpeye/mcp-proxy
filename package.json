@@ -20,7 +20,7 @@
   "license": "MIT",
   "description": "A TypeScript SSE proxy for MCP servers that use stdio transport.",
   "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "types": "dist/index.d.mts",
   "repository": {
     "url": "https://github.com/punkpeye/mcp-proxy"
   },
