@@ -22,10 +22,13 @@ npm install mcp-proxy
 ### Command-line
 
 ```bash
-npx mcp-proxy --port 8080 --shell tsx server.js
+npx mcp-proxy --port 8080 --shell -- tsx server.js
 ```
 
 This starts a server and `stdio` server (`tsx server.js`). The server listens on port 8080 and `/mcp` (streamable HTTP) and `/sse` (SSE) endpoints, and forwards messages to the `stdio` server.
+
+> [!NOTE]
+> The `--` separator is required to separate mcp-proxy options from the command being proxied.
 
 options:
 
@@ -40,19 +43,6 @@ options:
 - `--shell`: Spawn the server via the user's shell
 - `--apiKey`: API key for authenticating requests (uses X-API-Key header)
 
-### Passing arguments to the wrapped command
-
-When wrapping a command that takes arguments starting with `-`, you must use `--` to prevent `mcp-proxy` from interpreting them as its own options. Everything after `--` is passed directly to the wrapped command.
-
-For example, to wrap a command that uses the `-v` flag:
-
-```bash
-# Wrong: mcp-proxy will try to parse -v as its own option
-npx mcp-proxy --port 8080 my-command -v
-
-# Correct: use -- to pass -v to my-command
-npx mcp-proxy --port 8080 -- my-command -v
-```
 
 ### Stateless Mode
 
@@ -68,10 +58,10 @@ Example usage:
 
 ```bash
 # Enable stateless mode
-npx mcp-proxy --port 8080 --stateless tsx server.js
+npx mcp-proxy --port 8080 --stateless -- tsx server.js
 
 # Stateless mode with stream-only transport
-npx mcp-proxy --port 8080 --stateless --server stream tsx server.js
+npx mcp-proxy --port 8080 --stateless --server stream -- tsx server.js
 ```
 
 > [!NOTE]
@@ -96,14 +86,14 @@ Authentication is disabled by default for backward compatibility. To enable it, 
 **Command-line:**
 
 ```bash
-npx mcp-proxy --port 8080 --apiKey "your-secret-key" tsx server.js
+npx mcp-proxy --port 8080 --apiKey "your-secret-key" -- tsx server.js
 ```
 
 **Environment variable:**
 
 ```bash
 export MCP_PROXY_API_KEY="your-secret-key"
-npx mcp-proxy --port 8080 tsx server.js
+npx mcp-proxy --port 8080 -- tsx server.js
 ```
 
 #### Client Configuration
@@ -401,5 +391,5 @@ const transport = tapTransport(new StdioClientTransport(), (event) => {
 ### Running MCP Proxy with a local server
 
 ```bash
-tsx src/bin/mcp-proxy.ts --debug tsx src/fixtures/simple-stdio-server.ts
+tsx src/bin/mcp-proxy.ts --debug -- tsx src/fixtures/simple-stdio-server.ts
 ```
