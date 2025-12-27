@@ -5,7 +5,9 @@ import {
   StreamableHTTPServerTransport,
 } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import fs from "fs";
 import http from "http";
+import https from "https";
 import { randomUUID } from "node:crypto";
 
 import { AuthConfig, AuthenticationMiddleware } from "./authentication.js";
@@ -857,6 +859,9 @@ export const startHTTPServer = async <T extends ServerLike>({
   onUnhandledRequest,
   port,
   sseEndpoint = "/sse",
+  sslCa,
+  sslCert,
+  sslKey,
   stateless,
   streamEndpoint = "/mcp",
 }: {
@@ -876,6 +881,9 @@ export const startHTTPServer = async <T extends ServerLike>({
   ) => Promise<void>;
   port: number;
   sseEndpoint?: null | string;
+  sslCa?: null | string;
+  sslCert?: null | string;
+  sslKey?: null | string;
   stateless?: boolean;
   streamEndpoint?: null | string;
 }): Promise<SSEServer> => {
@@ -894,7 +902,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   /**
    * @author https://dev.classmethod.jp/articles/mcp-sse/
    */
-  const httpServer = http.createServer(async (req, res) => {
+  const requestListener: http.RequestListener = async (req, res) => {
     // Apply CORS headers
     applyCorsHeaders(req, res, cors);
 
@@ -958,7 +966,36 @@ export const startHTTPServer = async <T extends ServerLike>({
     } else {
       res.writeHead(404).end();
     }
-  });
+  };
+
+  let httpServer;
+  if (sslCa || sslCert || sslKey) {
+    const options: https.ServerOptions = {};
+    if (sslCa) {
+      try {
+        options.ca = fs.readFileSync(sslCa);
+      } catch (error) {
+        throw new Error(`Failed to read CA file '${sslCa}': ${(error as Error).message}`);
+      }
+    }
+    if (sslCert) {
+      try {
+        options.cert = fs.readFileSync(sslCert);
+      } catch (error) {
+        throw new Error(`Failed to read certificate file '${sslCert}': ${(error as Error).message}`);
+      }
+    }
+    if (sslKey) {
+      try {
+        options.key = fs.readFileSync(sslKey);
+      } catch (error) {
+        throw new Error(`Failed to read key file '${sslKey}': ${(error as Error).message}`);
+      }
+    }
+    httpServer = https.createServer(options, requestListener);
+  }else{
+    httpServer = http.createServer(requestListener);
+  }
 
   await new Promise((resolve) => {
     httpServer.listen(port, host, () => {

@@ -4,3 +4,5 @@ package-lock.json
 .DS_Store
 PR-SUBMISSION-GUIDE.md
 ".claude/" 
+src/fixtures/certs/
+src/fixtures/generate-certs.sh

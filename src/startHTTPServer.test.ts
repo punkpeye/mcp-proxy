@@ -4,7 +4,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { EventSource } from "eventsource";
+import fs from "fs";
 import { getRandomPort } from "get-port-please";
+import https from "https";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 
@@ -2082,6 +2084,62 @@ it("supports custom methods and maxAge", async () => {
     "GET, POST, PUT, DELETE",
   );
   expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
+
+  await httpServer.close();
+});
+
+// SSL Tests
+
+it("supports creating an SSL server", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+    sslCert: 'src/fixtures/certs/server-cert.pem',
+    sslKey: 'src/fixtures/certs/server-key.pem',
+  });
+
+  const options = {
+    ca: fs.readFileSync('src/fixtures/certs/ca-cert.pem'),
+    cert: fs.readFileSync('src/fixtures/certs/client-cert.pem'),
+    hostname: 'localhost',
+    key: fs.readFileSync('src/fixtures/certs/client-key.pem'),
+    method: 'GET',
+    path: '/ping',
+    port,
+  };
+
+  // Use https.get to test client certificate authentication
+  // (Node's fetch API doesn't support custom HTTPS agents with client certs)
+  const response = await new Promise<{statusCode?:number, text:string}>((resolve, reject) => {
+    https.get(options, (res) => {
+      let data = '';
+
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+
+      res.on('end', () => {
+        resolve({ statusCode: res.statusCode, text: data });
+      });
+
+      res.on('error', (err) => {
+        reject(err);
+      });
+    }).on('error', (err) => {
+      reject(err);
+    });
+  });
+
+  expect(response.statusCode).toBe(200);
+  expect(response.text).toBe("pong");
 
   await httpServer.close();
 });

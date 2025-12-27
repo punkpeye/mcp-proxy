@@ -78,6 +78,18 @@ const argv = await yargs(hideBin(process.argv))
       describe: "The SSE endpoint to listen on",
       type: "string",
     },
+    sslCa: {
+      describe: "Filename to override the trusted CA certificates",
+      type: "string",
+    },
+    sslCert: {
+      describe: "Cert chains filename in PEM format",
+      type: "string",
+    },
+    sslKey: {
+      describe: "Private keys filename in PEM format",
+      type: "string",
+    },
     stateless: {
       default: false,
       describe:
@@ -171,6 +183,9 @@ const proxy = async () => {
       argv.server && argv.server !== "sse"
         ? null
         : (argv.sseEndpoint ?? argv.endpoint),
+    sslCa: argv.sslCa,
+    sslCert: argv.sslCert,
+    sslKey: argv.sslKey,
     stateless: argv.stateless,
     streamEndpoint:
       argv.server && argv.server !== "stream"

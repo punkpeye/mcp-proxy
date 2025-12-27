@@ -42,6 +42,9 @@ options:
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
 - `--apiKey`: API key for authenticating requests (uses X-API-Key header)
+- `--sslCa`: Filename to override the trusted CA certificates
+- `--sslCert`: Cert chains filename in PEM format
+- `--sslKey`: Private keys filename in PEM format
 
 
 ### Stateless Mode
