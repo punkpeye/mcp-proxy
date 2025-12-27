@@ -22,17 +22,7 @@ if (!("EventSource" in global)) {
 
 const argv = await yargs(hideBin(process.argv))
   .scriptName("mcp-proxy")
-  .command("$0 <command> [args...]", "Run a command with MCP arguments")
-  .positional("command", {
-    demandOption: true,
-    describe: "The command to run",
-    type: "string",
-  })
-  .positional("args", {
-    array: true,
-    describe: "The arguments to pass to the command",
-    type: "string",
-  })
+  .usage("$0 [options] -- <command> [args...]")
   .env("MCP_PROXY")
   .parserConfiguration({
     "populate--": true,
@@ -115,15 +105,16 @@ const argv = await yargs(hideBin(process.argv))
   .help()
   .parseAsync();
 
-// Determine the final command and args
-if (!argv.command) {
-  throw new Error("No command specified");
+// Determine the final command and args from -- separator
+const dashDashArgs = argv["--"] as string[] | undefined;
+if (!dashDashArgs || dashDashArgs.length === 0) {
+  console.error("Error: No command specified.");
+  console.error("Usage: mcp-proxy [options] -- <command> [args...]");
+  console.error("");
+  console.error("Example: mcp-proxy --port 8080 -- node server.js --port 3000");
+  process.exit(1);
 }
-
-const finalCommand = argv.command;
-
-// If -- separator was used, args after -- are in argv["--"], otherwise use parsed args
-const finalArgs = (argv["--"] as string[]) || argv.args;
+const [finalCommand, ...finalArgs] = dashDashArgs;
 
 const connect = async (client: Client) => {
   const transport = new StdioClientTransport({
