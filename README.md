@@ -21,6 +21,16 @@ npm install mcp-proxy
 
 ### Command-line
 
+MCP Proxy supports two invocation patterns:
+
+**Simple usage (no mcp-proxy options):**
+
+```bash
+npx mcp-proxy npx -y @anthropic/mcp-server-filesystem /path
+```
+
+**With mcp-proxy options:**
+
 ```bash
 npx mcp-proxy --port 8080 --shell -- tsx server.js
 ```
@@ -28,7 +38,11 @@ npx mcp-proxy --port 8080 --shell -- tsx server.js
 This starts a server and `stdio` server (`tsx server.js`). The server listens on port 8080 and `/mcp` (streamable HTTP) and `/sse` (SSE) endpoints, and forwards messages to the `stdio` server.
 
 > [!NOTE]
-> The `--` separator is required to separate mcp-proxy options from the command being proxied.
+> **About the `--` separator:**
+> - The `--` separator is **optional** when you don't need to pass options to mcp-proxy
+> - Use `--` when you need to pass options to mcp-proxy (like `--port`, `--shell`, etc.) to clearly separate them from the command
+> - Without `--`, the first positional argument is treated as the command, and all subsequent arguments are passed to that command
+> - The `--` separator is also useful when the command itself has flags that might conflict with mcp-proxy options
 
 options:
 

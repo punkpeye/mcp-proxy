@@ -22,7 +22,17 @@ if (!("EventSource" in global)) {
 
 const argv = await yargs(hideBin(process.argv))
   .scriptName("mcp-proxy")
-  .usage("$0 [options] -- <command> [args...]")
+  .command("$0 [command] [args...]", "Proxy an MCP stdio server over HTTP")
+  .positional("command", {
+    describe: "The command to run",
+    type: "string",
+  })
+  .positional("args", {
+    array: true,
+    describe: "The arguments to pass to the command",
+    type: "string",
+  })
+  .usage("$0 [options] -- <command> [args...]\n       $0 <command> [args...]")
   .env("MCP_PROXY")
   .parserConfiguration({
     "populate--": true,
@@ -105,16 +115,29 @@ const argv = await yargs(hideBin(process.argv))
   .help()
   .parseAsync();
 
-// Determine the final command and args from -- separator
+// If -- separator was used, everything after -- is the command and its args
 const dashDashArgs = argv["--"] as string[] | undefined;
-if (!dashDashArgs || dashDashArgs.length === 0) {
+
+let finalCommand: string;
+let finalArgs: string[];
+
+if (dashDashArgs && dashDashArgs.length > 0) {
+  // -- was used: first item after -- is command, rest are args
+  [finalCommand, ...finalArgs] = dashDashArgs;
+} else if (argv.command) {
+  // No -- used: use positional command and args
+  finalCommand = argv.command as string;
+  finalArgs = (argv.args as string[]) || [];
+} else {
   console.error("Error: No command specified.");
   console.error("Usage: mcp-proxy [options] -- <command> [args...]");
+  console.error("   or: mcp-proxy <command> [args...]");
   console.error("");
-  console.error("Example: mcp-proxy --port 8080 -- node server.js --port 3000");
+  console.error("Examples:");
+  console.error("  mcp-proxy --port 8080 -- node server.js --port 3000");
+  console.error("  mcp-proxy node server.js");
   process.exit(1);
 }
-const [finalCommand, ...finalArgs] = dashDashArgs;
 
 const connect = async (client: Client) => {
   const transport = new StdioClientTransport({
