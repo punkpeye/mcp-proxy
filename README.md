@@ -46,7 +46,6 @@ options:
 - `--sslCert`: Cert chains filename in PEM format
 - `--sslKey`: Private keys filename in PEM format
 
-
 ### Stateless Mode
 
 By default, MCP Proxy maintains persistent sessions for HTTP streamable transport, where each client connection is associated with a server instance that stays alive for the duration of the session.

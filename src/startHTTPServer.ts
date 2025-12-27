@@ -975,25 +975,31 @@ export const startHTTPServer = async <T extends ServerLike>({
       try {
         options.ca = fs.readFileSync(sslCa);
       } catch (error) {
-        throw new Error(`Failed to read CA file '${sslCa}': ${(error as Error).message}`);
+        throw new Error(
+          `Failed to read CA file '${sslCa}': ${(error as Error).message}`,
+        );
       }
     }
     if (sslCert) {
       try {
         options.cert = fs.readFileSync(sslCert);
       } catch (error) {
-        throw new Error(`Failed to read certificate file '${sslCert}': ${(error as Error).message}`);
+        throw new Error(
+          `Failed to read certificate file '${sslCert}': ${(error as Error).message}`,
+        );
       }
     }
     if (sslKey) {
       try {
         options.key = fs.readFileSync(sslKey);
       } catch (error) {
-        throw new Error(`Failed to read key file '${sslKey}': ${(error as Error).message}`);
+        throw new Error(
+          `Failed to read key file '${sslKey}': ${(error as Error).message}`,
+        );
       }
     }
     httpServer = https.createServer(options, requestListener);
-  }else{
+  } else {
     httpServer = http.createServer(requestListener);
   }
 

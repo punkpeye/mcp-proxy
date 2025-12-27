@@ -2102,41 +2102,45 @@ it("supports creating an SSL server", async () => {
       return mcpServer;
     },
     port,
-    sslCert: 'src/fixtures/certs/server-cert.pem',
-    sslKey: 'src/fixtures/certs/server-key.pem',
+    sslCert: "src/fixtures/certs/server-cert.pem",
+    sslKey: "src/fixtures/certs/server-key.pem",
   });
 
   const options = {
-    ca: fs.readFileSync('src/fixtures/certs/ca-cert.pem'),
-    cert: fs.readFileSync('src/fixtures/certs/client-cert.pem'),
-    hostname: 'localhost',
-    key: fs.readFileSync('src/fixtures/certs/client-key.pem'),
-    method: 'GET',
-    path: '/ping',
+    ca: fs.readFileSync("src/fixtures/certs/ca-cert.pem"),
+    cert: fs.readFileSync("src/fixtures/certs/client-cert.pem"),
+    hostname: "localhost",
+    key: fs.readFileSync("src/fixtures/certs/client-key.pem"),
+    method: "GET",
+    path: "/ping",
     port,
   };
 
   // Use https.get to test client certificate authentication
   // (Node's fetch API doesn't support custom HTTPS agents with client certs)
-  const response = await new Promise<{statusCode?:number, text:string}>((resolve, reject) => {
-    https.get(options, (res) => {
-      let data = '';
+  const response = await new Promise<{ statusCode?: number; text: string }>(
+    (resolve, reject) => {
+      https
+        .get(options, (res) => {
+          let data = "";
 
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
+          res.on("data", (chunk) => {
+            data += chunk;
+          });
 
-      res.on('end', () => {
-        resolve({ statusCode: res.statusCode, text: data });
-      });
+          res.on("end", () => {
+            resolve({ statusCode: res.statusCode, text: data });
+          });
 
-      res.on('error', (err) => {
-        reject(err);
-      });
-    }).on('error', (err) => {
-      reject(err);
-    });
-  });
+          res.on("error", (err) => {
+            reject(err);
+          });
+        })
+        .on("error", (err) => {
+          reject(err);
+        });
+    },
+  );
 
   expect(response.statusCode).toBe(200);
   expect(response.text).toBe("pong");
