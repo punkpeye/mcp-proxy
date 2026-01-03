@@ -3,10 +3,14 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { EventSource } from "eventsource";
+import { createRequire } from "node:module";
 import { setTimeout } from "node:timers";
 import util from "node:util";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
+
+const require = createRequire(import.meta.url);
+const packageJson = require("../../package.json") as { version: string };
 
 import { InMemoryEventStore } from "../InMemoryEventStore.js";
 import { proxyServer } from "../proxyServer.js";
@@ -22,6 +26,7 @@ if (!("EventSource" in global)) {
 
 const argv = await yargs(hideBin(process.argv))
   .scriptName("mcp-proxy")
+  .version(packageJson.version)
   .command("$0 [command] [args...]", "Proxy an MCP stdio server over HTTP")
   .positional("command", {
     describe: "The command to run",
