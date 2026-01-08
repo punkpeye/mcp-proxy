@@ -47,6 +47,12 @@ const argv = await yargs(hideBin(process.argv))
       describe: "API key for authenticating requests (uses X-API-Key header)",
       type: "string",
     },
+    connectionTimeout: {
+      default: 60000,
+      describe:
+        "The timeout (in milliseconds) for initial connection to the MCP server (default: 60 seconds)",
+      type: "number",
+    },
     debug: {
       default: false,
       describe: "Enable debug logging",
@@ -144,7 +150,7 @@ if (dashDashArgs && dashDashArgs.length > 0) {
   process.exit(1);
 }
 
-const connect = async (client: Client) => {
+const connect = async (client: Client, connectionTimeout: number) => {
   const transport = new StdioClientTransport({
     args: finalArgs,
     command: finalCommand,
@@ -159,7 +165,7 @@ const connect = async (client: Client) => {
     stderr: "inherit",
   });
 
-  await client.connect(transport);
+  await client.connect(transport, { timeout: connectionTimeout });
 };
 
 const proxy = async () => {
@@ -173,7 +179,7 @@ const proxy = async () => {
     },
   );
 
-  await connect(client);
+  await connect(client, argv.connectionTimeout);
 
   const serverVersion = client.getServerVersion() as {
     name: string;
