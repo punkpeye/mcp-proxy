@@ -74,5 +74,8 @@
     "splitting": true,
     "sourcemap": true,
     "clean": true
+  },
+  "dependencies": {
+    "pipenet": "^1.3.0"
   }
 }

@@ -60,6 +60,31 @@ options:
 - `--sslCa`: Filename to override the trusted CA certificates
 - `--sslCert`: Cert chains filename in PEM format
 - `--sslKey`: Private keys filename in PEM format
+- `--tunnel`: Expose the proxy via a public tunnel (see [Public Tunnel](#public-tunnel))
+- `--tunnelSubdomain`: Request a specific subdomain for the tunnel (availability not guaranteed)
+
+### Public Tunnel
+
+MCP Proxy can expose your local server to the public internet using a tunnel service. This is useful for testing webhooks, sharing your development server, or accessing your MCP server from anywhere.
+
+```bash
+# Expose your MCP server via a public tunnel
+npx mcp-proxy --port 8080 --tunnel -- tsx server.js
+
+# Request a specific subdomain
+npx mcp-proxy --port 8080 --tunnel --tunnelSubdomain myapp -- tsx server.js
+```
+
+When the tunnel is established, you'll see a message like:
+
+```
+tunnel established at https://abcdefghij.tunnel.gla.ma
+```
+
+> [!NOTE]
+> The requested subdomain may not be available. The actual URL will be displayed when the tunnel is established.
+
+This feature is powered by [pipenet](https://github.com/AugmentHQ/pipenet) and sponsored by [glama.ai](https://glama.ai). For more information, see the [pipenet announcement](https://glama.ai/blog/2026-01-19-pipenet).
 
 ### Stateless Mode
 

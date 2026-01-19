@@ -6,6 +6,7 @@ import { EventSource } from "eventsource";
 import { createRequire } from "node:module";
 import { setTimeout } from "node:timers";
 import util from "node:util";
+import { pipenet } from "pipenet";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
@@ -122,6 +123,15 @@ const argv = await yargs(hideBin(process.argv))
       describe: "The stream endpoint to listen on",
       type: "string",
     },
+    tunnel: {
+      default: false,
+      describe: "Expose the proxy via a public tunnel using tunnel.gla.ma",
+      type: "boolean",
+    },
+    tunnelSubdomain: {
+      describe: "Request a specific subdomain for the tunnel (availability not guaranteed)",
+      type: "string",
+    },
   })
   .help()
   .parseAsync();
@@ -227,9 +237,24 @@ const proxy = async () => {
         : (argv.streamEndpoint ?? argv.endpoint),
   });
 
+  let tunnel: Awaited<ReturnType<typeof pipenet>> | undefined;
+
+  if (argv.tunnel) {
+    console.info("establishing tunnel via tunnel.gla.ma");
+    tunnel = await pipenet({
+      host: "https://tunnel.gla.ma",
+      port: argv.port,
+      subdomain: argv.tunnelSubdomain,
+    });
+    console.info("tunnel established at %s", tunnel.url);
+  }
+
   return {
-    close: () => {
-      return server.close();
+    close: async () => {
+      await server.close();
+      if (tunnel) {
+        await tunnel.close();
+      }
     },
   };
 };
