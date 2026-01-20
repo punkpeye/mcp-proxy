@@ -358,10 +358,12 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       body = await getBody(req);
 
-      // Per-request authentication in stateless mode
-      if (stateless && authenticate) {
+      // Per-request authentication for all requests
+      // Store authResult to update existing sessions with fresh auth context
+      let authResult: unknown;
+      if (authenticate) {
         try {
-          const authResult = await authenticate(req);
+          authResult = await authenticate(req);
 
           // Check for both falsy AND { authenticated: false } pattern
           if (
@@ -452,6 +454,19 @@ const handleStreamRequest = async <T extends ServerLike>({
 
         transport = activeTransport.transport;
         server = activeTransport.server;
+
+        // Update session's auth context with fresh authentication result
+        if (
+          authResult &&
+          typeof server === "object" &&
+          server !== null &&
+          "updateAuth" in server &&
+          typeof (server as { updateAuth?: unknown }).updateAuth === "function"
+        ) {
+          (server as { updateAuth: (auth: unknown) => void }).updateAuth(
+            authResult,
+          );
+        }
       } else if (!sessionId && isInitializeRequest(body)) {
         // Create a new transport for the session
         transport = new StreamableHTTPServerTransport({

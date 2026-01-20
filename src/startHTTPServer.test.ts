@@ -969,7 +969,7 @@ it("returns 401 when authenticate callback throws error in stateless mode", asyn
   await stdioClient.close();
 });
 
-it("does not call authenticate on subsequent requests in stateful mode", async () => {
+it("calls authenticate on every request in stateful mode", async () => {
   const stdioTransport = new StdioClientTransport({
     args: ["src/fixtures/simple-stdio-server.ts"],
     command: "tsx",
@@ -1042,16 +1042,17 @@ it("does not call authenticate on subsequent requests in stateful mode", async (
 
   await streamClient.connect(streamTransport);
 
+  const initialCallCount = authenticate.mock.calls.length;
+
   // Make first request
   await streamClient.listResources();
 
   // Make second request
   await streamClient.listResources();
 
-  // In stateful mode, authenticate should NOT be called per-request
-  // It may be called during initialization, but not on every tool call
-  // The key is that it's not called multiple times for each request
-  expect(authenticate).not.toHaveBeenCalled();
+  // In stateful mode, authenticate should be called on every request
+  // to ensure tokens are validated and not expired
+  expect(authenticate.mock.calls.length).toBeGreaterThan(initialCallCount);
 
   await streamClient.close();
   await httpServer.close();
