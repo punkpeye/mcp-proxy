@@ -358,8 +358,8 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       body = await getBody(req);
 
-      // Per-request authentication in stateless mode
-      if (stateless && authenticate) {
+      // Per-request authentication for all requests
+      if (authenticate) {
         try {
           const authResult = await authenticate(req);
 
