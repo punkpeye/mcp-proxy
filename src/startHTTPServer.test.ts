@@ -2047,7 +2047,7 @@ it("uses default CORS settings when cors: true", async () => {
   expect(response.status).toBe(204);
   expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
   expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
-    "Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id",
+    "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id",
   );
   expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
 
