@@ -348,9 +348,12 @@ const handleStreamRequest = async <T extends ServerLike>({
   ) {
     let body: unknown;
     try {
-      const sessionId = Array.isArray(req.headers["mcp-session-id"])
-        ? req.headers["mcp-session-id"][0]
-        : req.headers["mcp-session-id"];
+      // In stateless mode, ignore session ID header entirely (like Python MCP SDK)
+      const sessionId = stateless
+        ? undefined
+        : (Array.isArray(req.headers["mcp-session-id"])
+            ? req.headers["mcp-session-id"][0]
+            : req.headers["mcp-session-id"]);
 
       let transport: StreamableHTTPServerTransport;
 
