@@ -219,7 +219,7 @@ const applyCorsHeaders = (
   // Default CORS configuration for backward compatibility
   const defaultCorsOptions: CorsOptions = {
     allowedHeaders:
-      "Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id",
+      "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id",
     credentials: true,
     exposedHeaders: ["Mcp-Session-Id"],
     methods: ["GET", "POST", "OPTIONS"],
