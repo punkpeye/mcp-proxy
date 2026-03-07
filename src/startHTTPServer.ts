@@ -741,13 +741,16 @@ const handleStreamRequest = async <T extends ServerLike>({
     }
 
     try {
+      // handleRequest for DELETE calls transport.close() internally,
+      // which triggers the transport.onclose callback that already
+      // handles server cleanup. No need to call cleanupServer again.
       await activeTransport.transport.handleRequest(req, res);
-
-      await cleanupServer(activeTransport.server, onClose);
     } catch (error) {
       console.error("[mcp-proxy] error handling delete request", error);
 
-      res.writeHead(500).end("Error handling delete request");
+      if (!res.headersSent) {
+        res.writeHead(500).end("Error handling delete request");
+      }
     }
 
     return true;

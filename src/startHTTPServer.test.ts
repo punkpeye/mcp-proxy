@@ -6,6 +6,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { EventSource } from "eventsource";
 import fs from "fs";
 import { getRandomPort } from "get-port-please";
+import http from "http";
 import https from "https";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
@@ -2148,3 +2149,148 @@ it("supports creating an SSL server", async () => {
 
   await httpServer.close();
 });
+
+it("DELETE request terminates session cleanly and calls onClose exactly once", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    { name: "mcp-proxy", version: "1.0.0" },
+    { capabilities: {} },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+  const onClose = vi.fn().mockResolvedValue(undefined);
+  const onConnect = vi.fn().mockResolvedValue(undefined);
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+      return mcpServer;
+    },
+    onClose,
+    onConnect,
+    port,
+  });
+
+  const streamClient = new Client(
+    { name: "stream-client", version: "1.0.0" },
+    { capabilities: {} },
+  );
+
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/mcp`),
+  );
+
+  await streamClient.connect(transport);
+
+  // Verify the session works
+  const result = await streamClient.listResources();
+  expect(result.resources).toHaveLength(1);
+
+  expect(onConnect).toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+
+  // Send DELETE to terminate the session — this should not cause ECONNRESET
+  await transport.terminateSession();
+  await streamClient.close();
+
+  await delay(500);
+
+  // onClose should be called exactly once, not twice
+  expect(onClose).toHaveBeenCalledTimes(1);
+
+  await httpServer.close();
+  await stdioClient.close();
+}, 15000);
+
+it("DELETE request to non-existent session returns 400", async () => {
+  const stdioTransport = new StdioClientTransport({
+    args: ["src/fixtures/simple-stdio-server.ts"],
+    command: "tsx",
+  });
+
+  const stdioClient = new Client(
+    { name: "mcp-proxy", version: "1.0.0" },
+    { capabilities: {} },
+  );
+
+  await stdioClient.connect(stdioTransport);
+
+  const serverVersion = stdioClient.getServerVersion() as {
+    name: string;
+    version: string;
+  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as {
+    capabilities: Record<string, unknown>;
+  };
+
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      const mcpServer = new Server(serverVersion, {
+        capabilities: serverCapabilities,
+      });
+      await proxyServer({
+        client: stdioClient,
+        server: mcpServer,
+        serverCapabilities,
+      });
+      return mcpServer;
+    },
+    port,
+  });
+
+  // Send DELETE with a fake session ID
+  const response = await new Promise<{ statusCode: number; text: string }>(
+    (resolve, reject) => {
+      const req = http.request(
+        {
+          headers: {
+            "mcp-session-id": "non-existent-session-id",
+          },
+          hostname: "localhost",
+          method: "DELETE",
+          path: "/mcp",
+          port,
+        },
+        (res) => {
+          let text = "";
+          res.on("data", (chunk: Buffer) => {
+            text += chunk.toString();
+          });
+          res.on("end", () => {
+            resolve({ statusCode: res.statusCode!, text });
+          });
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    },
+  );
+
+  expect(response.statusCode).toBe(400);
+
+  await httpServer.close();
+  await stdioClient.close();
+}, 15000);
