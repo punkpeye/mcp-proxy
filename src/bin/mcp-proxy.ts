@@ -2,6 +2,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
 import { EventSource } from "eventsource";
 import { createRequire } from "node:module";
 import { setTimeout } from "node:timers";
@@ -196,9 +197,7 @@ const proxy = async () => {
     version: string;
   };
 
-  const serverCapabilities = client.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = client.getServerCapabilities() as ServerCapabilities;
 
   console.info("starting server on port %d", argv.port);
 

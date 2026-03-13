@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransportOptions } from "@modelcontextprotocol/sdk/
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
 
 import { proxyServer } from "./proxyServer.js";
 
@@ -58,9 +59,7 @@ export const startStdioServer = async ({
     version: string;
   };
 
-  const serverCapabilities = streamClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = streamClient.getServerCapabilities() as ServerCapabilities;
 
   const stdioServer = initStdioServer
     ? await initStdioServer()

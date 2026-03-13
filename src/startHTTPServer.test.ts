@@ -3,6 +3,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
 import { EventSource } from "eventsource";
 import fs from "fs";
 import { getRandomPort } from "get-port-please";
@@ -42,9 +43,7 @@ it("proxies messages between HTTP stream and stdio servers", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -155,9 +154,7 @@ it("proxies messages between SSE and stdio servers", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -265,9 +262,7 @@ it("supports stateless HTTP streamable transport", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -354,9 +349,7 @@ it("allows requests when no auth is configured", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -434,9 +427,7 @@ it("rejects requests without API key when auth is enabled", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -503,9 +494,7 @@ it("accepts requests with valid API key", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
   const apiKey = "test-api-key-123";
@@ -591,9 +580,7 @@ it("works with SSE transport and authentication", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
   const apiKey = "test-api-key-456";
@@ -730,9 +717,7 @@ it("accepts requests with valid Bearer token in stateless mode", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -825,9 +810,7 @@ it("returns 401 when authenticate callback returns null in stateless mode", asyn
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -908,9 +891,7 @@ it("returns 401 when authenticate callback throws error in stateless mode", asyn
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -993,9 +974,7 @@ it("calls authenticate on every request in stateful mode", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -1083,9 +1062,7 @@ it("calls authenticate on every request in stateless mode", async () => {
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -1211,9 +1188,7 @@ it("returns 401 when authenticate callback returns { authenticated: false } in s
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -1297,9 +1272,7 @@ it("returns 401 with custom error message when { authenticated: false, error: '.
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -1766,9 +1739,7 @@ it("succeeds when authenticate returns { authenticated: true } in stateless mode
     version: string;
   };
 
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 
@@ -2167,9 +2138,7 @@ it("DELETE request terminates session cleanly and calls onClose exactly once", a
     name: string;
     version: string;
   };
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
   const onClose = vi.fn().mockResolvedValue(undefined);
@@ -2240,9 +2209,7 @@ it("DELETE request to non-existent session returns 400", async () => {
     name: string;
     version: string;
   };
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
 
   const port = await getRandomPort();
 

@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import { McpError, ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
 import { EventSource } from "eventsource";
 import { getRandomPort } from "get-port-please";
 import { describe, expect, it } from "vitest";
@@ -59,9 +59,7 @@ async function createTestEnvironment(
     name: string;
     version: string;
   };
-  const serverCapabilities = stdioClient.getServerCapabilities() as {
-    capabilities: Record<string, unknown>;
-  };
+  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
   const port = await getRandomPort();
 
   const httpServer = await startHTTPServer({
