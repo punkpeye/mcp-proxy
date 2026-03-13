@@ -41,7 +41,7 @@ describe("JSONFilterTransform", () => {
     expect(outputLines).toHaveLength(4);
     expect(outputLines[0]).toBe('{"type": "request", "id": 1}');
     expect(outputLines[1]).toBe('{"type": "response", "id": 2}');
-    expect(outputLines[2]).toBe('  {"type": "notification"}  ');
+    expect(outputLines[2]).toBe('{"type": "notification"}');
     expect(outputLines[3]).toBe('{"type": "request", "id": 3}');
 
     // Should have warned about non-JSON lines
@@ -50,9 +50,54 @@ describe("JSONFilterTransform", () => {
       expect.arrayContaining([
         "This is not JSON",
         "Another non-JSON line",
-        "",
         "Error: something went wrong",
       ]),
+    );
+
+    consoleWarnSpy.mockRestore();
+  });
+
+  it("extracts JSON from lines with non-JSON prefixes", async () => {
+    const input = [
+      'Loading...{"type": "request", "id": 1}',
+      'WARNING: deprecation{"type": "response", "id": 2}',
+      '{"type": "clean", "id": 3}',
+      "Pure noise with no JSON",
+    ].join("\n");
+
+    const consoleWarnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => {});
+
+    const readable = Readable.from([input]);
+    const transform = new JSONFilterTransform();
+    const chunks: Buffer[] = [];
+
+    const writable = new Writable({
+      write(chunk, _encoding, callback) {
+        chunks.push(chunk);
+        callback();
+      },
+    });
+
+    await pipeline(readable, transform, writable);
+
+    const output = Buffer.concat(chunks).toString();
+    const outputLines = output.trim().split("\n");
+
+    expect(outputLines).toHaveLength(3);
+    expect(outputLines[0]).toBe('{"type": "request", "id": 1}');
+    expect(outputLines[1]).toBe('{"type": "response", "id": 2}');
+    expect(outputLines[2]).toBe('{"type": "clean", "id": 3}');
+
+    // Should have warned about stripped prefixes
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      "[mcp-proxy] stripped non-JSON prefix from output:",
+      "Loading...",
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      "[mcp-proxy] stripped non-JSON prefix from output:",
+      "WARNING: deprecation",
     );
 
     consoleWarnSpy.mockRestore();
