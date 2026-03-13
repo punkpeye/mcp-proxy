@@ -67,7 +67,7 @@ export class JSONFilterTransform extends Transform {
  * Extracts the JSON portion from a line that may have a non-JSON prefix.
  * Returns null if the line contains no '{'.
  */
-function extractJson(line: string): string | null {
+function extractJson(line: string): null | string {
   const trimmed = line.trim();
   if (trimmed.length === 0) {
     return null;
