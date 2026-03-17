@@ -1,5 +1,7 @@
 # MCP Proxy
 
+[![AgentRank](https://agentrank-ai.com/api/badge/tool/punkpeye--mcp-proxy)](https://agentrank-ai.com/tool/punkpeye--mcp-proxy/)
+
 A TypeScript streamable HTTP and SSE proxy for [MCP](https://modelcontextprotocol.io/) servers that use `stdio` transport.
 
 > [!NOTE]
