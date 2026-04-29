@@ -62,6 +62,7 @@ options:
 - `--sslKey`: Private keys filename in PEM format
 - `--tunnel`: Expose the proxy via a public tunnel (see [Public Tunnel](#public-tunnel))
 - `--tunnelSubdomain`: Request a specific subdomain for the tunnel (availability not guaranteed)
+- `--corsAddAllowedHeader`: Add a header name to `Access-Control-Allow-Headers` (defaults preserved). Repeat to add multiple. Useful when running with `--apiKey` so browser preflights for `X-API-Key` succeed.
 
 ### Public Tunnel
 
@@ -317,6 +318,23 @@ await startHTTPServer({
   },
 });
 ```
+
+#### CLI: adding allowed headers
+
+The CLI exposes a single `--corsAddAllowedHeader` flag that appends to the
+default `Access-Control-Allow-Headers` list (defaults preserved). The most
+common use is unblocking the browser preflight for a custom auth header when
+the proxy is started with `--apiKey`:
+
+```bash
+npx mcp-proxy --port 8080 --apiKey secret \
+  --corsAddAllowedHeader X-API-Key \
+  -- npx -y @modelcontextprotocol/server-filesystem /srv
+```
+
+Repeat the flag to add more (`--corsAddAllowedHeader X-API-Key --corsAddAllowedHeader X-Other`).
+For broader CORS overrides (origin allowlist, wildcard headers, disabling CORS),
+use the programmatic `cors` option below.
 
 #### Migration from Older Versions
 
