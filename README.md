@@ -63,6 +63,24 @@ options:
 - `--tunnel`: Expose the proxy via a public tunnel (see [Public Tunnel](#public-tunnel))
 - `--tunnelSubdomain`: Request a specific subdomain for the tunnel (availability not guaranteed)
 
+### Troubleshooting Python stdio servers
+
+If a Python stdio MCP server times out with an error such as `Expected server to respond to ping`, make sure Python is running in unbuffered mode. Buffered stdout can delay MCP JSON-RPC messages long enough for the proxy to treat the server as unresponsive.
+
+Use `python -u` when launching the server:
+
+```bash
+npx mcp-proxy -- python -u -m your_package.mcp_server
+```
+
+Alternatively, set `PYTHONUNBUFFERED=1`:
+
+```bash
+PYTHONUNBUFFERED=1 npx mcp-proxy -- python -m your_package.mcp_server
+```
+
+MCP stdio servers should also reserve stdout for protocol messages. Send logs, warnings, and other diagnostic output to stderr, and use `--debug` when you need proxy-side logs.
+
 ### Public Tunnel
 
 MCP Proxy can expose your local server to the public internet using a tunnel service. This is useful for testing webhooks, sharing your development server, or accessing your MCP server from anywhere.
