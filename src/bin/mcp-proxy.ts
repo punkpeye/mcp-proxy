@@ -55,6 +55,12 @@ const argv = await yargs(hideBin(process.argv))
         "The timeout (in milliseconds) for initial connection to the MCP server (default: 60 seconds)",
       type: "number",
     },
+    corsAddAllowedHeader: {
+      array: true,
+      describe:
+        "Add a header name to Access-Control-Allow-Headers (defaults preserved). Repeat to add multiple, e.g. `--corsAddAllowedHeader X-API-Key`.",
+      type: "string",
+    },
     debug: {
       default: false,
       describe: "Enable debug logging",
@@ -137,6 +143,22 @@ const argv = await yargs(hideBin(process.argv))
   .help()
   .parseAsync();
 
+// Default Access-Control-Allow-Headers list — must stay in sync with
+// `defaultCorsOptions.allowedHeaders` in src/startHTTPServer.ts.
+const DEFAULT_ALLOWED_HEADERS = [
+  "Content-Type",
+  "Authorization",
+  "Accept",
+  "Mcp-Session-Id",
+  "Mcp-Protocol-Version",
+  "Last-Event-Id",
+];
+
+const corsOption =
+  argv.corsAddAllowedHeader && argv.corsAddAllowedHeader.length > 0
+    ? { allowedHeaders: [...DEFAULT_ALLOWED_HEADERS, ...argv.corsAddAllowedHeader] }
+    : undefined;
+
 // If -- separator was used, everything after -- is the command and its args
 const dashDashArgs = argv["--"] as string[] | undefined;
 
@@ -218,6 +240,7 @@ const proxy = async () => {
 
   const server = await startHTTPServer({
     apiKey: argv.apiKey,
+    cors: corsOption,
     createServer,
     eventStore: new InMemoryEventStore(),
     host: argv.host,
