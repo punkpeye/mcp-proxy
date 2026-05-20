@@ -688,7 +688,14 @@ const handleStreamRequest = async <T extends ServerLike>({
         }
       | undefined = sessionId ? activeTransports[sessionId] : undefined;
 
-    if (!sessionId) {
+    if (!sessionId) {  
+      // Return METHOD_NOT_ALLOWED so stateless clients' transport stops reconnecting
+      if (stateless) {
+        res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
+
+        return true;
+      }
+
       res.writeHead(400).end("No sessionId");
 
       return true;
