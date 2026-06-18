@@ -951,7 +951,15 @@ export const startHTTPServer = async <T extends ServerLike>({
     // and would otherwise short-circuit the MCP protocol handlers.
     // Use a fixed base because `host` may be "::" (IPv6 any), which is not a
     // valid URL authority. We only need pathname here.
-    const requestUrl = new URL(req.url || "", "http://localhost");
+    // A malformed request target (e.g. "//") makes `new URL` throw, which
+    // would crash the process from this listener, so reject it with 400.
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(req.url || "", "http://localhost");
+    } catch {
+      res.writeHead(400).end("Bad Request");
+      return;
+    }
     const isMcpEndpoint =
       (sseEndpoint && requestUrl.pathname === sseEndpoint) ||
       (streamEndpoint && requestUrl.pathname === streamEndpoint);

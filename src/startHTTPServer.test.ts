@@ -667,6 +667,36 @@ it("does not require auth for /ping endpoint", async () => {
   await httpServer.close();
 });
 
+it("responds with 400 to a malformed request target instead of crashing", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server({ name: "test", version: "1.0.0" }, { capabilities: {} });
+    },
+    port,
+  });
+
+  // `//` is not a valid URL target; sent via http.request so it isn't
+  // normalized away. Before the fix this threw inside the request listener
+  // and crashed the process.
+  const statusCode = await new Promise<number>((resolve, reject) => {
+    const request = http.request(
+      { host: "localhost", path: "//", port },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
+
+  expect(statusCode).toBe(400);
+
+  await httpServer.close();
+});
+
 it("does not require auth for OPTIONS requests", async () => {
   const port = await getRandomPort();
   const apiKey = "test-api-key-999";
