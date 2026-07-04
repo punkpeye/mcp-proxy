@@ -4,7 +4,10 @@ import {
   EventStore,
   StreamableHTTPServerTransport,
 } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import {
+  isInitializeRequest,
+  JSONRPCMessageSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import fs from "fs";
 import http from "http";
 import https from "https";
@@ -58,6 +61,35 @@ const createJsonRpcErrorResponse = (code: number, message: string) => {
     id: null,
     jsonrpc: "2.0",
   });
+};
+
+type SessionUnauthorizedResponseOptions = {
+  readonly body?: unknown;
+  readonly oauth?: AuthConfig["oauth"];
+  readonly res: http.ServerResponse;
+};
+
+const getRequestId = (body: unknown): unknown => {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    Array.isArray(body) ||
+    !("id" in body)
+  ) {
+    return null;
+  }
+
+  return body.id;
+};
+
+const isJsonRpcMessage = (message: unknown): boolean => {
+  return JSONRPCMessageSchema.safeParse(message).success;
+};
+
+const isJsonRpcBody = (body: unknown): boolean => {
+  return Array.isArray(body)
+    ? body.every(isJsonRpcMessage)
+    : isJsonRpcMessage(body);
 };
 
 // Helper function to get WWW-Authenticate header value
@@ -121,6 +153,35 @@ const getWWWAuthenticateHeader = (
   }
 
   return `Bearer ${params.join(", ")}`;
+};
+
+const sendSessionUnauthorizedResponse = ({
+  body,
+  oauth,
+  res,
+}: SessionUnauthorizedResponseOptions): void => {
+  const message = "Unauthorized: No valid session ID provided";
+
+  res.setHeader("Content-Type", "application/json");
+
+  const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
+    error: "invalid_token",
+    error_description: message,
+  });
+  if (wwwAuthHeader) {
+    res.setHeader("WWW-Authenticate", wwwAuthHeader);
+  }
+
+  res.writeHead(401).end(
+    JSON.stringify({
+      error: {
+        code: -32000,
+        message,
+      },
+      id: getRequestId(body),
+      jsonrpc: "2.0",
+    }),
+  );
 };
 
 // Helper function to detect scope challenge errors
@@ -351,9 +412,9 @@ const handleStreamRequest = async <T extends ServerLike>({
       // In stateless mode, ignore session ID header entirely (like Python MCP SDK)
       const sessionId = stateless
         ? undefined
-        : (Array.isArray(req.headers["mcp-session-id"])
-            ? req.headers["mcp-session-id"][0]
-            : req.headers["mcp-session-id"]);
+        : Array.isArray(req.headers["mcp-session-id"])
+          ? req.headers["mcp-session-id"][0]
+          : req.headers["mcp-session-id"];
 
       let transport: StreamableHTTPServerTransport;
 
@@ -447,6 +508,12 @@ const handleStreamRequest = async <T extends ServerLike>({
       if (sessionId) {
         const activeTransport = activeTransports[sessionId];
         if (!activeTransport) {
+          if (authenticate && isJsonRpcBody(body)) {
+            sendSessionUnauthorizedResponse({ body, oauth, res });
+
+            return true;
+          }
+
           res.setHeader("Content-Type", "application/json");
           res
             .writeHead(404)
@@ -632,6 +699,12 @@ const handleStreamRequest = async <T extends ServerLike>({
 
         return true;
       } else {
+        if (authenticate && isJsonRpcBody(body)) {
+          sendSessionUnauthorizedResponse({ body, oauth, res });
+
+          return true;
+        }
+
         // Error if the server is not created but the request is not an initialize request
         res.setHeader("Content-Type", "application/json");
 
@@ -688,10 +761,16 @@ const handleStreamRequest = async <T extends ServerLike>({
         }
       | undefined = sessionId ? activeTransports[sessionId] : undefined;
 
-    if (!sessionId) {  
+    if (!sessionId) {
       // Return METHOD_NOT_ALLOWED so stateless clients' transport stops reconnecting
       if (stateless) {
         res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
+
+        return true;
+      }
+
+      if (authenticate) {
+        sendSessionUnauthorizedResponse({ oauth, res });
 
         return true;
       }
@@ -702,6 +781,12 @@ const handleStreamRequest = async <T extends ServerLike>({
     }
 
     if (!activeTransport) {
+      if (authenticate) {
+        sendSessionUnauthorizedResponse({ oauth, res });
+
+        return true;
+      }
+
       res.writeHead(400).end("No active transport");
 
       return true;
@@ -733,6 +818,12 @@ const handleStreamRequest = async <T extends ServerLike>({
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
     if (!sessionId) {
+      if (authenticate) {
+        sendSessionUnauthorizedResponse({ oauth, res });
+
+        return true;
+      }
+
       res.writeHead(400).end("Invalid or missing sessionId");
 
       return true;
@@ -743,6 +834,12 @@ const handleStreamRequest = async <T extends ServerLike>({
     const activeTransport = activeTransports[sessionId];
 
     if (!activeTransport) {
+      if (authenticate) {
+        sendSessionUnauthorizedResponse({ oauth, res });
+
+        return true;
+      }
+
       res.writeHead(400).end("No active transport");
       return true;
     }
@@ -1020,7 +1117,7 @@ export const startHTTPServer = async <T extends ServerLike>({
     res.writeHead(404).end();
   };
 
-  let httpServer;
+  let httpServer: http.Server | https.Server;
   if (sslCa || sslCert || sslKey) {
     const options: https.ServerOptions = {};
     if (sslCa) {
