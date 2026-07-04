@@ -452,6 +452,27 @@ await startStdioServer({
 });
 ```
 
+To bridge a hosted streamable HTTP server into stdio, choose
+`ServerType.HTTPStream` and pass any required client headers through
+`transportOptions`. For example, Xquik exposes a hosted MCP endpoint for X data
+workflows:
+
+```ts
+import { ServerType, startStdioServer } from "mcp-proxy";
+
+await startStdioServer({
+  serverType: ServerType.HTTPStream,
+  transportOptions: {
+    requestInit: {
+      headers: {
+        Authorization: `Bearer ${process.env.XQUIK_API_KEY}`,
+      },
+    },
+  },
+  url: "https://xquik.com/mcp",
+});
+```
+
 #### `tapTransport`
 
 Taps into a transport and logs events.
