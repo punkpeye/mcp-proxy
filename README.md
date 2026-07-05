@@ -54,6 +54,7 @@ options:
 - `--port`: Specify the port to listen on (default: 8080)
 - `--connectionTimeout`: Timeout in milliseconds for the initial connection to the MCP server (default: 60000, which is 60 seconds)
 - `--requestTimeout`: Timeout in milliseconds for requests to the MCP server (default: 300000, which is 5 minutes)
+- `--keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000, which is 5 minutes)
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
 - `--apiKey`: API key for authenticating requests (uses X-API-Key header)
@@ -430,6 +431,7 @@ Options:
 - `eventStore`: Event store for streamable HTTP transport (optional)
 - `port`: Port number to listen on
 - `host`: Host to bind to (default: "::")
+- `keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000)
 - `sseEndpoint`: SSE endpoint path (default: "/sse", set to null to disable)
 - `streamEndpoint`: Streamable HTTP endpoint path (default: "/mcp", set to null to disable)
 - `stateless`: Enable stateless mode for HTTP streamable transport (default: false)
