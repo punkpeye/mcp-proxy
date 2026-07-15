@@ -16,6 +16,8 @@ import { randomUUID } from "node:crypto";
 import { AuthConfig, AuthenticationMiddleware } from "./authentication.js";
 import { InMemoryEventStore } from "./InMemoryEventStore.js";
 
+const DEFAULT_KEEP_ALIVE_TIMEOUT = 300_000;
+
 export interface CorsOptions {
   allowedHeaders?: string | string[]; // Allow string[] or '*' for wildcard
   credentials?: boolean;
@@ -978,6 +980,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   enableJsonResponse,
   eventStore,
   host = "::",
+  keepAliveTimeout = DEFAULT_KEEP_ALIVE_TIMEOUT,
   oauth,
   onClose,
   onConnect,
@@ -997,6 +1000,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   enableJsonResponse?: boolean;
   eventStore?: EventStore;
   host?: string;
+  keepAliveTimeout?: number;
   oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
@@ -1151,6 +1155,14 @@ export const startHTTPServer = async <T extends ServerLike>({
   } else {
     httpServer = http.createServer(requestListener);
   }
+
+  // Keep stateful stream sessions from being torn down when Node closes
+  // otherwise-idle HTTP keep-alive sockets after its 5 second default.
+  httpServer.keepAliveTimeout = keepAliveTimeout;
+  httpServer.headersTimeout = Math.max(
+    httpServer.headersTimeout,
+    keepAliveTimeout + 1000,
+  );
 
   await new Promise((resolve) => {
     httpServer.listen(port, host, () => {

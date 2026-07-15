@@ -80,6 +80,12 @@ const argv = await yargs(hideBin(process.argv))
       describe: "The host to listen on",
       type: "string",
     },
+    keepAliveTimeout: {
+      default: 300000,
+      describe:
+        "The HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 5 minutes)",
+      type: "number",
+    },
     port: {
       default: 8080,
       describe: "The port to listen on",
@@ -244,6 +250,7 @@ const proxy = async () => {
     createServer,
     eventStore: new InMemoryEventStore(),
     host: argv.host,
+    keepAliveTimeout: argv.keepAliveTimeout,
     port: argv.port,
     sseEndpoint:
       argv.server && argv.server !== "sse"
