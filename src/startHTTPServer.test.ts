@@ -131,6 +131,73 @@ it("proxies messages between HTTP stream and stdio servers", async () => {
   expect(onClose).toHaveBeenCalled();
 });
 
+it(
+  "keeps stateful HTTP stream sessions alive after idle keep-alive timeout window",
+  async () => {
+    const port = await getRandomPort();
+    const onClose = vi.fn().mockResolvedValue(undefined);
+
+    const httpServer = await startHTTPServer({
+      createServer: async () => {
+        return new Server(
+          { name: "test", version: "1.0.0" },
+          { capabilities: {} },
+        );
+      },
+      onClose,
+      port,
+    });
+
+    const initializeResponse = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0.0" },
+          protocolVersion: "2025-03-26",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(initializeResponse.status).toBe(200);
+    const sessionId = initializeResponse.headers.get("mcp-session-id");
+    expect(sessionId).toBeTruthy();
+    await initializeResponse.text();
+
+    await delay(6_000);
+
+    const listToolsResponse = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 2,
+        jsonrpc: "2.0",
+        method: "tools/list",
+        params: {},
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "mcp-session-id": sessionId!,
+      },
+      method: "POST",
+    });
+    const listToolsBody = await listToolsResponse.text();
+
+    expect(listToolsResponse.status).not.toBe(404);
+    expect(listToolsBody).not.toContain("Session not found");
+    expect(onClose).not.toHaveBeenCalled();
+
+    await httpServer.close();
+  },
+  15_000,
+);
+
 it("proxies messages between SSE and stdio servers", async () => {
   const stdioTransport = new StdioClientTransport({
     args: ["src/fixtures/simple-stdio-server.ts"],
