@@ -993,6 +993,136 @@ it("accepts requests with valid Bearer token in stateless mode", async () => {
   await stdioClient.close();
 });
 
+it("returns 401 for authenticated stream requests without a session ID", async () => {
+  const port = await getRandomPort();
+  const authenticate = vi.fn().mockResolvedValue({ userId: "test-user" });
+  const createServer = vi.fn(async () => {
+    return new Server({ name: "test", version: "1.0.0" }, { capabilities: {} });
+  });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer,
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/list",
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: "Bearer valid-token",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+
+    const errorResponse = (await response.json()) as {
+      error: { code: number; message: string };
+      id: null | number;
+      jsonrpc: string;
+    };
+    expect(errorResponse.error).toEqual({
+      code: -32000,
+      message: "Unauthorized: No valid session ID provided",
+    });
+    expect(errorResponse.id).toBe(1);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    expect(createServer).not.toHaveBeenCalled();
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("returns 401 for authenticated stream GET requests without a session ID", async () => {
+  const port = await getRandomPort();
+  const authenticate = vi.fn().mockResolvedValue({ userId: "test-user" });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: "Bearer valid-token",
+      },
+      method: "GET",
+    });
+
+    expect(response.status).toBe(401);
+
+    const errorResponse = (await response.json()) as {
+      error: { code: number; message: string };
+      id: null | number;
+      jsonrpc: string;
+    };
+    expect(errorResponse.error.message).toBe(
+      "Unauthorized: No valid session ID provided",
+    );
+    expect(errorResponse.id).toBeNull();
+    expect(authenticate).not.toHaveBeenCalled();
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("keeps malformed authenticated stream requests as 400", async () => {
+  const port = await getRandomPort();
+  const authenticate = vi.fn().mockResolvedValue({ userId: "test-user" });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({ malformed: true }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: "Bearer valid-token",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+
+    const errorResponse = (await response.json()) as {
+      error: { code: number; message: string };
+      id: null | number;
+      jsonrpc: string;
+    };
+    expect(errorResponse.error.message).toBe(
+      "Bad Request: No valid session ID provided",
+    );
+    expect(authenticate).toHaveBeenCalledTimes(1);
+  } finally {
+    await httpServer.close();
+  }
+});
+
 it("returns 401 when authenticate callback returns null in stateless mode", async () => {
   const stdioTransport = new StdioClientTransport({
     args: ["src/fixtures/simple-stdio-server.ts"],
