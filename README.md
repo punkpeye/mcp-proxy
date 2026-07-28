@@ -1,5 +1,7 @@
 # MCP Proxy
 
+[![MCP Toplist](https://mcptoplist.com/badge/mcp.so%2Fmcp-proxy%2Fpunkpeye.svg)](https://mcptoplist.com/server/mcp.so%2Fmcp-proxy%2Fpunkpeye)
+
 A TypeScript streamable HTTP and SSE proxy for [MCP](https://modelcontextprotocol.io/) servers that use `stdio` transport.
 
 > [!NOTE]
