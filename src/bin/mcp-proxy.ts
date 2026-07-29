@@ -14,7 +14,6 @@ import { hideBin } from "yargs/helpers";
 const require = createRequire(import.meta.url);
 const packageJson = require("../../package.json") as { version: string };
 
-import { InMemoryEventStore } from "../InMemoryEventStore.js";
 import { proxyServer } from "../proxyServer.js";
 import { SSEServer, startHTTPServer } from "../startHTTPServer.js";
 import { StdioClientTransport } from "../StdioClientTransport.js";
@@ -69,6 +68,18 @@ const argv = await yargs(hideBin(process.argv))
     endpoint: {
       describe: "The endpoint to listen on",
       type: "string",
+    },
+    eventStore: {
+      default: true,
+      describe:
+        "Enable the streamable HTTP transport's resumability event store, which lets clients replay missed messages after a reconnect. Use --no-eventStore to disable it entirely for request/response-only deployments that don't need this and would rather avoid the memory overhead",
+      type: "boolean",
+    },
+    eventStoreMaxEvents: {
+      default: 1000,
+      describe:
+        "Maximum number of buffered events the resumability event store retains (per session) before it evicts the oldest; bounds memory use. Ignored when --no-eventStore is set",
+      type: "number",
     },
     gracefulShutdownTimeout: {
       default: 5000,
@@ -148,6 +159,13 @@ const argv = await yargs(hideBin(process.argv))
   })
   .help()
   .parseAsync();
+
+if (!(argv.eventStoreMaxEvents >= 1)) {
+  console.error(
+    `Error: --eventStoreMaxEvents must be a number >= 1 (got ${String(argv.eventStoreMaxEvents)}). Use --no-eventStore to disable the event store instead.`,
+  );
+  process.exit(1);
+}
 
 // Default Access-Control-Allow-Headers list — must stay in sync with
 // `defaultCorsOptions.allowedHeaders` in src/startHTTPServer.ts.
@@ -248,7 +266,8 @@ const proxy = async () => {
     apiKey: argv.apiKey,
     cors: corsOption,
     createServer,
-    eventStore: new InMemoryEventStore(),
+    eventStore: argv.eventStore ? undefined : false,
+    eventStoreMaxEvents: argv.eventStoreMaxEvents,
     host: argv.host,
     keepAliveTimeout: argv.keepAliveTimeout,
     port: argv.port,

@@ -2597,3 +2597,78 @@ it("DELETE request to non-existent session returns 400", async () => {
   await httpServer.close();
   await stdioClient.close();
 }, 15000);
+
+// The SDK only writes a resumability "priming event" (an `id: <eventId>`
+// SSE line) when an event store is configured, so its presence/absence is a
+// reliable, wire-level signal of whether resumability is actually active -
+// see https://github.com/punkpeye/mcp-proxy/issues/72.
+const initializeAndGetRawBody = async (port: number) => {
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        // Priming events are only sent to clients whose negotiated protocol
+        // version is >= 2025-11-25.
+        protocolVersion: "2025-11-25",
+      },
+    }),
+    headers: {
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(200);
+
+  return response.text();
+};
+
+it("disables the resumability event store when eventStore: false is passed", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    eventStore: false,
+    port,
+  });
+
+  try {
+    const body = await initializeAndGetRawBody(port);
+
+    expect(body).not.toMatch(/^id: /m);
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("enables a bounded, per-session resumability event store by default", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    const body = await initializeAndGetRawBody(port);
+
+    expect(body).toMatch(/^id: /m);
+  } finally {
+    await httpServer.close();
+  }
+});

@@ -18,6 +18,25 @@ import { InMemoryEventStore } from "./InMemoryEventStore.js";
 
 const DEFAULT_KEEP_ALIVE_TIMEOUT = 300_000;
 
+/**
+ * `false` disables the resumability event store entirely (no replay-on-
+ * reconnect, no retained state). Omitted/`undefined` creates a fresh,
+ * bounded `InMemoryEventStore` per session - see `eventStoreMaxEvents`.
+ * Pass an `EventStore` instance to use a shared or custom-backed store.
+ */
+export type EventStoreOption = EventStore | false;
+
+const resolveEventStore = (
+  eventStore: EventStoreOption | undefined,
+  maxEvents: number | undefined,
+): EventStore | undefined => {
+  if (eventStore === false) {
+    return undefined;
+  }
+
+  return eventStore ?? new InMemoryEventStore({ maxEvents });
+};
+
 export interface CorsOptions {
   allowedHeaders?: string | string[]; // Allow string[] or '*' for wildcard
   credentials?: boolean;
@@ -381,6 +400,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   enableJsonResponse,
   endpoint,
   eventStore,
+  eventStoreMaxEvents,
   oauth,
   onClose,
   onConnect,
@@ -397,7 +417,8 @@ const handleStreamRequest = async <T extends ServerLike>({
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
   endpoint: string;
-  eventStore?: EventStore;
+  eventStore?: EventStoreOption;
+  eventStoreMaxEvents?: number;
   oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
@@ -543,7 +564,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         // Create a new transport for the session
         transport = new StreamableHTTPServerTransport({
           enableJsonResponse,
-          eventStore: eventStore || new InMemoryEventStore(),
+          eventStore: resolveEventStore(eventStore, eventStoreMaxEvents),
           onsessioninitialized: (_sessionId) => {
             // add only when the id Session id is generated (skip in stateless mode)
             if (!stateless && _sessionId) {
@@ -637,7 +658,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         // In stateless mode, handle non-initialize requests by creating a new transport
         transport = new StreamableHTTPServerTransport({
           enableJsonResponse,
-          eventStore: eventStore || new InMemoryEventStore(),
+          eventStore: resolveEventStore(eventStore, eventStoreMaxEvents),
           onsessioninitialized: () => {
             // No session tracking in stateless mode
           },
@@ -979,6 +1000,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   createServer,
   enableJsonResponse,
   eventStore,
+  eventStoreMaxEvents,
   host = "::",
   keepAliveTimeout = DEFAULT_KEEP_ALIVE_TIMEOUT,
   oauth,
@@ -998,7 +1020,22 @@ export const startHTTPServer = async <T extends ServerLike>({
   cors?: boolean | CorsOptions;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
-  eventStore?: EventStore;
+  /**
+   * Event store for the streamable HTTP transport's resumability support.
+   * Pass `false` to disable resumability entirely (recommended for
+   * request/response-only deployments that don't need replay-on-reconnect).
+   * Omit to get a fresh, bounded `InMemoryEventStore` per session - see
+   * `eventStoreMaxEvents`. Pass an `EventStore` instance to bring your own
+   * (e.g. a persistent, cross-process store); it will be shared across all
+   * sessions handled by this server.
+   */
+  eventStore?: EventStoreOption;
+  /**
+   * Caps how many events the auto-created per-session `InMemoryEventStore`
+   * retains (oldest evicted first) before it's overridden by an explicit
+   * `eventStore`. Bounds memory for long-lived sessions. Default: 1000.
+   */
+  eventStoreMaxEvents?: number;
   host?: string;
   keepAliveTimeout?: number;
   oauth?: AuthConfig["oauth"];
@@ -1107,6 +1144,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         enableJsonResponse,
         endpoint: streamEndpoint,
         eventStore,
+        eventStoreMaxEvents,
         oauth,
         onClose,
         onConnect,

@@ -55,6 +55,8 @@ options:
 - `--connectionTimeout`: Timeout in milliseconds for the initial connection to the MCP server (default: 60000, which is 60 seconds)
 - `--requestTimeout`: Timeout in milliseconds for requests to the MCP server (default: 300000, which is 5 minutes)
 - `--keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000, which is 5 minutes)
+- `--eventStore`: Enable the streamable HTTP transport's resumability event store, which lets clients replay missed messages after a reconnect (default: `true`). Use `--no-eventStore` to disable it entirely for request/response-only deployments that don't need replay and would rather avoid the memory overhead. See [Resumability and memory use](#resumability-and-memory-use).
+- `--eventStoreMaxEvents`: Maximum number of buffered events the resumability event store retains per session before it evicts the oldest (default: 1000). Ignored when `--no-eventStore` is set.
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
 - `--apiKey`: API key for authenticating requests (uses X-API-Key header)
@@ -417,7 +419,6 @@ const { close } = await startHTTPServer({
   createServer: async () => {
     return new Server();
   },
-  eventStore: new InMemoryEventStore(),
   port: 8080,
   stateless: false, // Optional: enable stateless mode for streamable HTTP transport
 });
@@ -428,7 +429,8 @@ close();
 Options:
 
 - `createServer`: Function that creates a new server instance for each connection
-- `eventStore`: Event store for streamable HTTP transport (optional)
+- `eventStore`: Event store for the streamable HTTP transport's resumability support (optional). Pass `false` to disable resumability entirely; omit to get a fresh, bounded `InMemoryEventStore` per session (see `eventStoreMaxEvents`); pass an `EventStore` instance to bring your own (e.g. persistent/cross-process), shared across all sessions. See [Resumability and memory use](#resumability-and-memory-use).
+- `eventStoreMaxEvents`: Caps how many events the auto-created per-session `InMemoryEventStore` retains before evicting the oldest (default: 1000). Only applies when `eventStore` is not explicitly provided.
 - `port`: Port number to listen on
 - `host`: Host to bind to (default: "::")
 - `keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000)
@@ -440,6 +442,25 @@ Options:
 - `onConnect`: Callback when a server connects (optional)
 - `onClose`: Callback when a server disconnects (optional)
 - `onUnhandledRequest`: Callback for unhandled HTTP requests (optional)
+
+##### Resumability and memory use
+
+The streamable HTTP transport can retain server→client messages so a client
+that reconnects with a `Last-Event-ID` can resume where it left off. By
+default, `mcp-proxy` gives each session its own `InMemoryEventStore` capped at
+1000 buffered events (oldest evicted first via `--eventStoreMaxEvents` /
+`eventStoreMaxEvents`), so a long-lived session's memory use stays bounded
+instead of growing for as long as the process runs.
+
+If you don't need resume-after-reconnect - for example, a short-lived
+request/response deployment - disable the store entirely with
+`--no-eventStore` (CLI) or `eventStore: false` (library) to drop the
+resumability bookkeeping altogether.
+
+If you need resumability with a larger replay window or one backed by shared
+storage (e.g. Redis) across multiple proxy processes, pass your own
+`EventStore` implementation as `eventStore`; in that case you're responsible
+for bounding its size.
 
 #### `startStdioServer`
 
