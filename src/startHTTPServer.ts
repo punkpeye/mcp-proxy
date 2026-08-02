@@ -958,7 +958,9 @@ const handleSSERequest = async <T extends ServerLike>({
       if (!closed) {
         console.error("[mcp-proxy] error connecting to server", error);
 
-        res.writeHead(500).end("Error connecting to server");
+        if (!res.headersSent) {
+          res.writeHead(500).end("Error connecting to server");
+        }
       }
     }
 
