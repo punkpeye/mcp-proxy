@@ -2672,3 +2672,54 @@ it("enables a bounded, per-session resumability event store by default", async (
     await httpServer.close();
   }
 });
+
+it("does not crash when the SSE connect error path runs after headers are sent", async () => {
+  // Regression test: the catch block of the SSE connect path called
+  // res.writeHead(500) without checking res.headersSent. When the failure
+  // happened after the SSE stream was established (headers already sent),
+  // writeHead threw ERR_HTTP_HEADERS_SENT, the request listener rejected,
+  // and the process died on the unhandled rejection.
+  const port = await getRandomPort();
+
+  const unhandledRejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    // server.connect() and the initial transport.send() succeed, so the
+    // SSE 200 headers are already on the wire when this throws.
+    onConnect: async () => {
+      throw new Error("simulated connect failure");
+    },
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/sse`);
+    expect(response.status).toBe(200);
+
+    // Wait until the error path has run, then give any rejection a tick.
+    await vi.waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith(
+        "[mcp-proxy] error connecting to server",
+        expect.any(Error),
+      );
+    });
+    await delay(100);
+
+    expect(unhandledRejections).toEqual([]);
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+    process.off("unhandledRejection", onUnhandledRejection);
+  }
+});
