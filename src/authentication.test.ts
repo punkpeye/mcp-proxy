@@ -57,6 +57,22 @@ describe("AuthenticationMiddleware", () => {
       expect(middleware.validateRequest(req)).toBe(false);
     });
 
+    it("should reject same-length API key with different content", () => {
+      const middleware = new AuthenticationMiddleware({ apiKey });
+      const req = createMockRequest({ "x-api-key": "test-api-key-124" });
+
+      expect(middleware.validateRequest(req)).toBe(false);
+    });
+
+    it("should reject API keys of arbitrary length without throwing", () => {
+      const middleware = new AuthenticationMiddleware({ apiKey });
+      const shortReq = createMockRequest({ "x-api-key": "a" });
+      const longReq = createMockRequest({ "x-api-key": "a".repeat(1024) });
+
+      expect(middleware.validateRequest(shortReq)).toBe(false);
+      expect(middleware.validateRequest(longReq)).toBe(false);
+    });
+
     it("should reject empty API key", () => {
       const middleware = new AuthenticationMiddleware({ apiKey });
       const req = createMockRequest({ "x-api-key": "" });
