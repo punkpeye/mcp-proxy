@@ -55,12 +55,22 @@ type ServerLike = {
   connect: Server["connect"];
 };
 
+const MAX_BODY_SIZE = 1_048_576; // 1 MiB
+
 const getBody = (request: http.IncomingMessage) => {
   return new Promise((resolve) => {
     const bodyParts: Buffer[] = [];
     let body: string;
+    let size = 0;
     request
       .on("data", (chunk) => {
+        size += chunk.length;
+        if (size > MAX_BODY_SIZE) {
+          console.error("[mcp-proxy] request body too large");
+          request.destroy();
+          resolve(null);
+          return;
+        }
         bodyParts.push(chunk);
       })
       .on("end", () => {
@@ -71,6 +81,13 @@ const getBody = (request: http.IncomingMessage) => {
           console.error("[mcp-proxy] error parsing body", error);
           resolve(null);
         }
+      })
+      .on("error", (error) => {
+        console.error("[mcp-proxy] error reading body", error);
+        resolve(null);
+      })
+      .on("close", () => {
+        resolve(null);
       });
   });
 };

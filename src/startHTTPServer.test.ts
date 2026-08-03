@@ -9,6 +9,7 @@ import fs from "fs";
 import { getRandomPort } from "get-port-please";
 import http from "http";
 import https from "https";
+import net from "net";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 
@@ -2723,3 +2724,125 @@ it("does not crash when the SSE connect error path runs after headers are sent",
     process.off("unhandledRejection", onUnhandledRejection);
   }
 });
+
+it("handles a client aborting the stream request mid-body instead of hanging", async () => {
+  // Regression test: getBody() only settled on "end". A client that stops
+  // transmitting mid-body (here: FIN after a partial JSON payload with a
+  // larger declared Content-Length) left the promise pending forever and
+  // the request handler never completed. The abort surfaces as an "error"
+  // event on the request stream; without the fix nothing listens for it,
+  // and this test exhausts its waitFor timeout.
+  const port = await getRandomPort();
+
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    await new Promise<void>((resolve) => {
+      const socket = net.connect(port, "localhost", () => {
+        socket.end(
+          "POST /mcp HTTP/1.1\r\n" +
+            `Host: localhost:${port}\r\n` +
+            "Content-Type: application/json\r\n" +
+            "Content-Length: 1000\r\n" +
+            "\r\n" +
+            '{"jsonrpc":"2.0",',
+        );
+      });
+      // Drain the response so the socket can close (an unread reply would
+      // otherwise keep "close" from firing). The server tears the
+      // connection down after the truncated body; either event means it is
+      // done with this connection.
+      socket.on("data", () => {});
+      socket.on("error", resolve);
+      socket.on("close", resolve);
+    });
+
+    // The aborted body must settle getBody() (as an invalid body) instead
+    // of leaving the request handler pending forever.
+    await vi.waitFor(
+      () => {
+        expect(consoleError).toHaveBeenCalledWith(
+          "[mcp-proxy] error reading body",
+          expect.any(Error),
+        );
+      },
+      { timeout: 2_000 },
+    );
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+  }
+}, 3_000);
+
+it("closes the connection instead of buffering a stream body without bound", async () => {
+  // getBody() accumulated every chunk with no size cap, so a client
+  // dripping chunks grew the request buffer indefinitely. The server must
+  // cut the connection once the body exceeds the cap and keep serving.
+  const port = await getRandomPort();
+
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    const chunk = Buffer.alloc(65_536, "x");
+    const totalChunks = 20; // 1.25 MiB, above the 1 MiB body cap
+
+    const closedEarly = await new Promise<boolean>((resolve) => {
+      const socket = net.connect(port, "localhost", () => {
+        socket.write(
+          "POST /mcp HTTP/1.1\r\n" +
+            `Host: localhost:${port}\r\n` +
+            "Content-Type: application/json\r\n" +
+            `Content-Length: ${chunk.length * totalChunks}\r\n` +
+            "\r\n",
+        );
+
+        let sent = 0;
+        const timer = setInterval(() => {
+          if (socket.destroyed || sent >= totalChunks) {
+            clearInterval(timer);
+            return;
+          }
+          sent += 1;
+          socket.write(chunk);
+        }, 25);
+
+        const onDone = () => {
+          clearInterval(timer);
+          resolve(sent < totalChunks);
+        };
+        socket.on("close", onDone);
+        // ECONNRESET after the server destroys the request is expected.
+        socket.on("error", onDone);
+      });
+    });
+
+    expect(closedEarly).toBe(true);
+
+    // The server survived the flood and keeps serving other requests.
+    const pingResponse = await fetch(`http://localhost:${port}/ping`);
+    expect(pingResponse.status).toBe(200);
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+  }
+}, 10_000);
