@@ -2728,15 +2728,27 @@ it("does not crash when the SSE connect error path runs after headers are sent",
 it("handles a client aborting the stream request mid-body instead of hanging", async () => {
   // Regression test: getBody() only settled on "end". A client that stops
   // transmitting mid-body (here: FIN after a partial JSON payload with a
-  // larger declared Content-Length) left the promise pending forever and
-  // the request handler never completed. The abort surfaces as an "error"
-  // event on the request stream; without the fix nothing listens for it,
-  // and this test exhausts its waitFor timeout.
+  // larger declared Content-Length) left the promise pending forever, so the
+  // request handler never got past `await getBody(...)`.
+  //
+  // What is asserted is that the handler *resumes*, observed through the
+  // `authenticate` hook, which runs on the statement immediately after that
+  // await. Asserting on the "error reading body" log would pass for the wrong
+  // reason: the string only exists in the fixed code, so it fails without the
+  // fix whether or not the promise ever settles, and it would keep passing if
+  // a later refactor logged without settling.
   const port = await getRandomPort();
 
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
+  let authenticateCalled = false;
+
   const httpServer = await startHTTPServer({
+    authenticate: async () => {
+      authenticateCalled = true;
+
+      return { authenticated: true };
+    },
     createServer: async () => {
       return new Server(
         { name: "test", version: "1.0.0" },
@@ -2767,14 +2779,11 @@ it("handles a client aborting the stream request mid-body instead of hanging", a
       socket.on("close", resolve);
     });
 
-    // The aborted body must settle getBody() (as an invalid body) instead
-    // of leaving the request handler pending forever.
+    // The aborted body must settle getBody() (as an invalid body) instead of
+    // leaving the request handler pending forever.
     await vi.waitFor(
       () => {
-        expect(consoleError).toHaveBeenCalledWith(
-          "[mcp-proxy] error reading body",
-          expect.any(Error),
-        );
+        expect(authenticateCalled).toBe(true);
       },
       { timeout: 2_000 },
     );
@@ -2784,10 +2793,75 @@ it("handles a client aborting the stream request mid-body instead of hanging", a
   }
 }, 3_000);
 
-it("closes the connection instead of buffering a stream body without bound", async () => {
-  // getBody() accumulated every chunk with no size cap, so a client
-  // dripping chunks grew the request buffer indefinitely. The server must
-  // cut the connection once the body exceeds the cap and keep serving.
+/**
+ * Speaks HTTP over a raw socket and returns everything the server wrote back.
+ * The oversize paths destroy the connection, so `fetch` would surface them as
+ * an opaque network error rather than a status line.
+ */
+const collectRawResponse = (
+  port: number,
+  write: (socket: net.Socket) => void,
+) =>
+  new Promise<string>((resolve) => {
+    const received: Buffer[] = [];
+    const socket = net.connect(port, "localhost", () => write(socket));
+
+    socket.on("data", (chunk) => received.push(chunk));
+
+    const onDone = () => resolve(Buffer.concat(received).toString());
+
+    socket.on("close", onDone);
+    // ECONNRESET once the server tears the connection down is expected.
+    socket.on("error", onDone);
+  });
+
+it("answers 413 without reading the body when Content-Length exceeds the cap", async () => {
+  // The declared size is enough to reject on: no body is sent at all here, so
+  // a server that waited to count bytes would never answer.
+  const port = await getRandomPort();
+
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const maxBodySize = 4_096;
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    maxBodySize,
+    port,
+  });
+
+  try {
+    const response = await collectRawResponse(port, (socket) => {
+      socket.write(
+        "POST /mcp HTTP/1.1\r\n" +
+          `Host: localhost:${port}\r\n` +
+          "Content-Type: application/json\r\n" +
+          `Content-Length: ${maxBodySize * 4}\r\n` +
+          "\r\n",
+      );
+    });
+
+    expect(response).toContain("HTTP/1.1 413");
+    expect(response).toContain("Payload Too Large");
+
+    // The server survived and keeps serving other requests.
+    const pingResponse = await fetch(`http://localhost:${port}/ping`);
+    expect(pingResponse.status).toBe(200);
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+  }
+}, 10_000);
+
+it("answers 413 when a chunked body grows past the cap", async () => {
+  // A chunked body declares no size up front, so only the streaming byte
+  // count can catch it. getBody() previously accumulated every chunk with no
+  // bound, letting a dripping client grow the buffer indefinitely.
   const port = await getRandomPort();
 
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -2807,39 +2881,39 @@ it("closes the connection instead of buffering a stream body without bound", asy
 
   try {
     const chunk = Buffer.alloc(65_536, "x");
-    const totalChunks = 20; // 1.25 MiB, five times the configured cap
 
-    const closedEarly = await new Promise<boolean>((resolve) => {
-      const socket = net.connect(port, "localhost", () => {
-        socket.write(
-          "POST /mcp HTTP/1.1\r\n" +
-            `Host: localhost:${port}\r\n` +
-            "Content-Type: application/json\r\n" +
-            `Content-Length: ${chunk.length * totalChunks}\r\n` +
-            "\r\n",
-        );
+    const response = await collectRawResponse(port, (socket) => {
+      socket.write(
+        "POST /mcp HTTP/1.1\r\n" +
+          `Host: localhost:${port}\r\n` +
+          "Content-Type: application/json\r\n" +
+          "Transfer-Encoding: chunked\r\n" +
+          "\r\n",
+      );
 
-        let sent = 0;
-        const timer = setInterval(() => {
-          if (socket.destroyed || sent >= totalChunks) {
-            clearInterval(timer);
-            return;
-          }
-          sent += 1;
-          socket.write(chunk);
-        }, 25);
-
-        const onDone = () => {
+      // Drip chunks until the server cuts us off. Five times the cap is sent
+      // if it never does, which fails the assertion below.
+      let sent = 0;
+      const timer = setInterval(() => {
+        if (socket.destroyed || socket.writableEnded || sent >= 20) {
           clearInterval(timer);
-          resolve(sent < totalChunks);
-        };
-        socket.on("close", onDone);
-        // ECONNRESET after the server destroys the request is expected.
-        socket.on("error", onDone);
+
+          return;
+        }
+
+        sent += 1;
+        socket.write(`${chunk.length.toString(16)}\r\n`);
+        socket.write(chunk);
+        socket.write("\r\n");
+      }, 10);
+
+      socket.on("close", () => {
+        clearInterval(timer);
       });
     });
 
-    expect(closedEarly).toBe(true);
+    expect(response).toContain("HTTP/1.1 413");
+    expect(response).toContain("Payload Too Large");
 
     // The server survived the flood and keeps serving other requests.
     const pingResponse = await fetch(`http://localhost:${port}/ping`);
