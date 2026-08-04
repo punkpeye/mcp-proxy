@@ -57,6 +57,7 @@ options:
 - `--keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000, which is 5 minutes)
 - `--eventStore`: Enable the streamable HTTP transport's resumability event store, which lets clients replay missed messages after a reconnect (default: `true`). Use `--no-eventStore` to disable it entirely for request/response-only deployments that don't need replay and would rather avoid the memory overhead. See [Resumability and memory use](#resumability-and-memory-use).
 - `--eventStoreMaxEvents`: Maximum number of buffered events the resumability event store retains per session before it evicts the oldest (default: 1000). Ignored when `--no-eventStore` is set.
+- `--maxBodySize`: Maximum request body size in bytes buffered by the streamable HTTP endpoint before the connection is dropped (default: 10485760, which is 10 MiB). Set to `0` to disable the limit. See [Request body size](#request-body-size).
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
 - `--apiKey`: API key for authenticating requests (uses X-API-Key header)
@@ -434,6 +435,7 @@ Options:
 - `port`: Port number to listen on
 - `host`: Host to bind to (default: "::")
 - `keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000)
+- `maxBodySize`: Caps how many bytes of a request body the streamable HTTP endpoint buffers before it drops the connection (default: 10485760, which is 10 MiB). Pass `false` to disable the cap. See [Request body size](#request-body-size).
 - `sseEndpoint`: SSE endpoint path (default: "/sse", set to null to disable)
 - `streamEndpoint`: Streamable HTTP endpoint path (default: "/mcp", set to null to disable)
 - `stateless`: Enable stateless mode for HTTP streamable transport (default: false)
@@ -461,6 +463,26 @@ If you need resumability with a larger replay window or one backed by shared
 storage (e.g. Redis) across multiple proxy processes, pass your own
 `EventStore` implementation as `eventStore`; in that case you're responsible
 for bounding its size.
+
+##### Request body size
+
+The streamable HTTP endpoint buffers each request body in memory before it
+parses the JSON-RPC message, so a single slow-chunking client could otherwise
+grow the process's memory for as long as it kept sending. `mcp-proxy` caps
+that buffer at 10 MiB by default (`--maxBodySize` / `maxBodySize`); a request
+that exceeds the cap has its connection dropped and is logged as
+`[mcp-proxy] request body too large`.
+
+The default is deliberately generous, because MCP payloads are often large -
+base64-encoded images, documents and long pasted text routinely push a single
+tool call past a megabyte. Raise it if your clients legitimately send more, or
+set it to `0` (CLI) / `false` (library) to disable the cap entirely, which
+restores unbounded buffering and is only safe behind a gateway that already
+limits body size.
+
+The cap applies to the streamable HTTP endpoint only. The SSE endpoint's
+`POST /messages` bodies are read by the MCP SDK, not by `mcp-proxy`, so this
+option does not affect them.
 
 #### `startStdioServer`
 

@@ -2792,6 +2792,8 @@ it("closes the connection instead of buffering a stream body without bound", asy
 
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
+  const maxBodySize = 262_144; // 256 KiB, well under the 10 MiB default
+
   const httpServer = await startHTTPServer({
     createServer: async () => {
       return new Server(
@@ -2799,12 +2801,13 @@ it("closes the connection instead of buffering a stream body without bound", asy
         { capabilities: {} },
       );
     },
+    maxBodySize,
     port,
   });
 
   try {
     const chunk = Buffer.alloc(65_536, "x");
-    const totalChunks = 20; // 1.25 MiB, above the 1 MiB body cap
+    const totalChunks = 20; // 1.25 MiB, five times the configured cap
 
     const closedEarly = await new Promise<boolean>((resolve) => {
       const socket = net.connect(port, "localhost", () => {
@@ -2846,3 +2849,84 @@ it("closes the connection instead of buffering a stream body without bound", asy
     consoleError.mockRestore();
   }
 }, 10_000);
+
+const buildLargeInitializeRequest = (padding: number) =>
+  JSON.stringify({
+    id: 1,
+    jsonrpc: "2.0",
+    method: "initialize",
+    params: {
+      capabilities: {},
+      clientInfo: { name: "x".repeat(padding), version: "1.0.0" },
+      protocolVersion: "2024-11-05",
+    },
+  });
+
+it("accepts a multi-megabyte request body under the default cap", async () => {
+  // The body cap must not reject payloads that MCP clients legitimately
+  // send - base64 images, documents and large pasted text routinely push a
+  // single tool call past a megabyte.
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+    stateless: true,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: buildLargeInitializeRequest(1_500_000), // ~1.5 MiB
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+  } finally {
+    await httpServer.close();
+  }
+}, 20_000);
+
+it("buffers a request body without limit when maxBodySize is false", async () => {
+  // `false` restores the pre-cap behaviour for deployments that bound body
+  // size at the gateway instead. The payload here is over the default cap,
+  // so it only succeeds because the cap is disabled.
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    maxBodySize: false,
+    port,
+    stateless: true,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: buildLargeInitializeRequest(11_534_336), // 11 MiB, over the 10 MiB default
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+  } finally {
+    await httpServer.close();
+  }
+}, 30_000);

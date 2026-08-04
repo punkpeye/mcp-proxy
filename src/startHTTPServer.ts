@@ -55,21 +55,36 @@ type ServerLike = {
   connect: Server["connect"];
 };
 
-const MAX_BODY_SIZE = 1_048_576; // 1 MiB
+const DEFAULT_MAX_BODY_SIZE = 10_485_760; // 10 MiB
 
-const getBody = (request: http.IncomingMessage) => {
+/**
+ * Caps how many bytes of a request body the stream endpoint buffers before it
+ * gives up. `false` (or `0` from the CLI) disables the cap entirely, restoring
+ * unbounded buffering - only do that behind a gateway that already limits body
+ * size. Omitted/`undefined` uses `DEFAULT_MAX_BODY_SIZE`.
+ */
+export type MaxBodySizeOption = false | number;
+
+const getBody = (
+  request: http.IncomingMessage,
+  maxBodySize: MaxBodySizeOption = DEFAULT_MAX_BODY_SIZE,
+) => {
   return new Promise((resolve) => {
     const bodyParts: Buffer[] = [];
     let body: string;
     let size = 0;
     request
       .on("data", (chunk) => {
-        size += chunk.length;
-        if (size > MAX_BODY_SIZE) {
-          console.error("[mcp-proxy] request body too large");
-          request.destroy();
-          resolve(null);
-          return;
+        if (maxBodySize !== false) {
+          size += chunk.length;
+          if (size > maxBodySize) {
+            console.error(
+              `[mcp-proxy] request body too large (exceeds ${maxBodySize} bytes)`,
+            );
+            request.destroy();
+            resolve(null);
+            return;
+          }
         }
         bodyParts.push(chunk);
       })
@@ -418,6 +433,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   endpoint,
   eventStore,
   eventStoreMaxEvents,
+  maxBodySize,
   oauth,
   onClose,
   onConnect,
@@ -436,6 +452,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   endpoint: string;
   eventStore?: EventStoreOption;
   eventStoreMaxEvents?: number;
+  maxBodySize?: MaxBodySizeOption;
   oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
@@ -460,7 +477,7 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       let server: T;
 
-      body = await getBody(req);
+      body = await getBody(req, maxBodySize);
 
       // Per-request authentication for all requests
       // Store authResult to update existing sessions with fresh auth context
@@ -1022,6 +1039,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   eventStoreMaxEvents,
   host = "::",
   keepAliveTimeout = DEFAULT_KEEP_ALIVE_TIMEOUT,
+  maxBodySize,
   oauth,
   onClose,
   onConnect,
@@ -1057,6 +1075,15 @@ export const startHTTPServer = async <T extends ServerLike>({
   eventStoreMaxEvents?: number;
   host?: string;
   keepAliveTimeout?: number;
+  /**
+   * Caps how many bytes of a request body the stream endpoint buffers before
+   * it destroys the connection, bounding the memory a single request can
+   * consume. Default: 10485760 (10 MiB). Pass `false` to disable the cap
+   * entirely (unbounded buffering - only safe behind a gateway that already
+   * limits body size). Does not apply to the SSE endpoint, whose POST bodies
+   * are read by the MCP SDK.
+   */
+  maxBodySize?: MaxBodySizeOption;
   oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
@@ -1164,6 +1191,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         endpoint: streamEndpoint,
         eventStore,
         eventStoreMaxEvents,
+        maxBodySize,
         oauth,
         onClose,
         onConnect,

@@ -97,6 +97,12 @@ const argv = await yargs(hideBin(process.argv))
         "The HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 5 minutes)",
       type: "number",
     },
+    maxBodySize: {
+      default: 10485760,
+      describe:
+        "Maximum request body size in bytes buffered by the stream endpoint before the connection is dropped; bounds the memory a single request can consume (default: 10 MiB). Set to 0 to disable the limit",
+      type: "number",
+    },
     port: {
       default: 8080,
       describe: "The port to listen on",
@@ -163,6 +169,13 @@ const argv = await yargs(hideBin(process.argv))
 if (!(argv.eventStoreMaxEvents >= 1)) {
   console.error(
     `Error: --eventStoreMaxEvents must be a number >= 1 (got ${String(argv.eventStoreMaxEvents)}). Use --no-eventStore to disable the event store instead.`,
+  );
+  process.exit(1);
+}
+
+if (!(argv.maxBodySize >= 0)) {
+  console.error(
+    `Error: --maxBodySize must be a number >= 0 (got ${String(argv.maxBodySize)}). Use --maxBodySize 0 to disable the limit instead.`,
   );
   process.exit(1);
 }
@@ -270,6 +283,7 @@ const proxy = async () => {
     eventStoreMaxEvents: argv.eventStoreMaxEvents,
     host: argv.host,
     keepAliveTimeout: argv.keepAliveTimeout,
+    maxBodySize: argv.maxBodySize === 0 ? false : argv.maxBodySize,
     port: argv.port,
     sseEndpoint:
       argv.server && argv.server !== "sse"
