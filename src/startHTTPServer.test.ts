@@ -9,6 +9,7 @@ import fs from "fs";
 import { getRandomPort } from "get-port-please";
 import http from "http";
 import https from "https";
+import net from "net";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 
@@ -2723,3 +2724,283 @@ it("does not crash when the SSE connect error path runs after headers are sent",
     process.off("unhandledRejection", onUnhandledRejection);
   }
 });
+
+it("handles a client aborting the stream request mid-body instead of hanging", async () => {
+  // Regression test: getBody() only settled on "end". A client that stops
+  // transmitting mid-body (here: FIN after a partial JSON payload with a
+  // larger declared Content-Length) left the promise pending forever, so the
+  // request handler never got past `await getBody(...)`.
+  //
+  // What is asserted is that the handler *resumes*, observed through the
+  // `authenticate` hook, which runs on the statement immediately after that
+  // await. Asserting on the "error reading body" log would pass for the wrong
+  // reason: the string only exists in the fixed code, so it fails without the
+  // fix whether or not the promise ever settles, and it would keep passing if
+  // a later refactor logged without settling.
+  const port = await getRandomPort();
+
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  let authenticateCalled = false;
+
+  const httpServer = await startHTTPServer({
+    authenticate: async () => {
+      authenticateCalled = true;
+
+      return { authenticated: true };
+    },
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    await new Promise<void>((resolve) => {
+      const socket = net.connect(port, "localhost", () => {
+        socket.end(
+          "POST /mcp HTTP/1.1\r\n" +
+            `Host: localhost:${port}\r\n` +
+            "Content-Type: application/json\r\n" +
+            "Content-Length: 1000\r\n" +
+            "\r\n" +
+            '{"jsonrpc":"2.0",',
+        );
+      });
+      // Drain the response so the socket can close (an unread reply would
+      // otherwise keep "close" from firing). The server tears the
+      // connection down after the truncated body; either event means it is
+      // done with this connection.
+      socket.on("data", () => {});
+      socket.on("error", resolve);
+      socket.on("close", resolve);
+    });
+
+    // The aborted body must settle getBody() (as an invalid body) instead of
+    // leaving the request handler pending forever.
+    await vi.waitFor(
+      () => {
+        expect(authenticateCalled).toBe(true);
+      },
+      { timeout: 2_000 },
+    );
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+  }
+}, 3_000);
+
+/**
+ * Speaks HTTP over a raw socket and returns everything the server wrote back.
+ * The oversize paths destroy the connection, so `fetch` would surface them as
+ * an opaque network error rather than a status line.
+ */
+const collectRawResponse = (
+  port: number,
+  write: (socket: net.Socket) => void,
+) =>
+  new Promise<string>((resolve) => {
+    const received: Buffer[] = [];
+    const socket = net.connect(port, "localhost", () => write(socket));
+
+    socket.on("data", (chunk) => received.push(chunk));
+
+    const onDone = () => resolve(Buffer.concat(received).toString());
+
+    socket.on("close", onDone);
+    // ECONNRESET once the server tears the connection down is expected.
+    socket.on("error", onDone);
+  });
+
+it("answers 413 without reading the body when Content-Length exceeds the cap", async () => {
+  // The declared size is enough to reject on: no body is sent at all here, so
+  // a server that waited to count bytes would never answer.
+  const port = await getRandomPort();
+
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const maxBodySize = 4_096;
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    maxBodySize,
+    port,
+  });
+
+  try {
+    const response = await collectRawResponse(port, (socket) => {
+      socket.write(
+        "POST /mcp HTTP/1.1\r\n" +
+          `Host: localhost:${port}\r\n` +
+          "Content-Type: application/json\r\n" +
+          `Content-Length: ${maxBodySize * 4}\r\n` +
+          "\r\n",
+      );
+    });
+
+    expect(response).toContain("HTTP/1.1 413");
+    expect(response).toContain("Payload Too Large");
+
+    // The server survived and keeps serving other requests.
+    const pingResponse = await fetch(`http://localhost:${port}/ping`);
+    expect(pingResponse.status).toBe(200);
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+  }
+}, 10_000);
+
+it("answers 413 when a chunked body grows past the cap", async () => {
+  // A chunked body declares no size up front, so only the streaming byte
+  // count can catch it. getBody() previously accumulated every chunk with no
+  // bound, letting a dripping client grow the buffer indefinitely.
+  const port = await getRandomPort();
+
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const maxBodySize = 262_144; // 256 KiB, well under the 10 MiB default
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    maxBodySize,
+    port,
+  });
+
+  try {
+    const chunk = Buffer.alloc(65_536, "x");
+
+    const response = await collectRawResponse(port, (socket) => {
+      socket.write(
+        "POST /mcp HTTP/1.1\r\n" +
+          `Host: localhost:${port}\r\n` +
+          "Content-Type: application/json\r\n" +
+          "Transfer-Encoding: chunked\r\n" +
+          "\r\n",
+      );
+
+      // Drip chunks until the server cuts us off. Five times the cap is sent
+      // if it never does, which fails the assertion below.
+      let sent = 0;
+      const timer = setInterval(() => {
+        if (socket.destroyed || socket.writableEnded || sent >= 20) {
+          clearInterval(timer);
+
+          return;
+        }
+
+        sent += 1;
+        socket.write(`${chunk.length.toString(16)}\r\n`);
+        socket.write(chunk);
+        socket.write("\r\n");
+      }, 10);
+
+      socket.on("close", () => {
+        clearInterval(timer);
+      });
+    });
+
+    expect(response).toContain("HTTP/1.1 413");
+    expect(response).toContain("Payload Too Large");
+
+    // The server survived the flood and keeps serving other requests.
+    const pingResponse = await fetch(`http://localhost:${port}/ping`);
+    expect(pingResponse.status).toBe(200);
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+  }
+}, 10_000);
+
+const buildLargeInitializeRequest = (padding: number) =>
+  JSON.stringify({
+    id: 1,
+    jsonrpc: "2.0",
+    method: "initialize",
+    params: {
+      capabilities: {},
+      clientInfo: { name: "x".repeat(padding), version: "1.0.0" },
+      protocolVersion: "2024-11-05",
+    },
+  });
+
+it("accepts a multi-megabyte request body under the default cap", async () => {
+  // The body cap must not reject payloads that MCP clients legitimately
+  // send - base64 images, documents and large pasted text routinely push a
+  // single tool call past a megabyte.
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+    stateless: true,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: buildLargeInitializeRequest(1_500_000), // ~1.5 MiB
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+  } finally {
+    await httpServer.close();
+  }
+}, 20_000);
+
+it("buffers a request body without limit when maxBodySize is false", async () => {
+  // `false` restores the pre-cap behaviour for deployments that bound body
+  // size at the gateway instead. The payload here is over the default cap,
+  // so it only succeeds because the cap is disabled.
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    maxBodySize: false,
+    port,
+    stateless: true,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: buildLargeInitializeRequest(11_534_336), // 11 MiB, over the 10 MiB default
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+  } finally {
+    await httpServer.close();
+  }
+}, 30_000);

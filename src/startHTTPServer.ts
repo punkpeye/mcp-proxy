@@ -55,22 +55,73 @@ type ServerLike = {
   connect: Server["connect"];
 };
 
-const getBody = (request: http.IncomingMessage) => {
-  return new Promise((resolve) => {
+const DEFAULT_MAX_BODY_SIZE = 10_485_760; // 10 MiB
+
+/**
+ * Caps how many bytes of a request body the stream endpoint buffers before it
+ * gives up. `false` (or `0` from the CLI) disables the cap entirely, restoring
+ * unbounded buffering - only do that behind a gateway that already limits body
+ * size. Omitted/`undefined` uses `DEFAULT_MAX_BODY_SIZE`.
+ */
+export type MaxBodySizeOption = false | number;
+
+/**
+ * "Too large" is kept distinct from the `null` that every other unusable body
+ * resolves to, so the caller can answer 413 rather than let it fall through to
+ * the generic 400. The limit travels with the signal so the response can name
+ * it.
+ */
+type BodyResult =
+  | { readonly body: unknown; readonly tooLarge?: never }
+  | { readonly limit: number; readonly tooLarge: true };
+
+const getBody = (
+  request: http.IncomingMessage,
+  maxBodySize: MaxBodySizeOption = DEFAULT_MAX_BODY_SIZE,
+) => {
+  return new Promise<BodyResult>((resolve) => {
+    if (maxBodySize !== false) {
+      // A client that declares its size up front can be rejected before a
+      // single byte of body is read. The streaming check below is still
+      // needed for chunked bodies and for clients that under-declare.
+      const declaredSize = Number(request.headers["content-length"]);
+
+      if (Number.isFinite(declaredSize) && declaredSize > maxBodySize) {
+        resolve({ limit: maxBodySize, tooLarge: true });
+
+        return;
+      }
+    }
+
     const bodyParts: Buffer[] = [];
     let body: string;
+    let size = 0;
     request
       .on("data", (chunk) => {
+        if (maxBodySize !== false) {
+          size += chunk.length;
+          if (size > maxBodySize) {
+            resolve({ limit: maxBodySize, tooLarge: true });
+            return;
+          }
+        }
         bodyParts.push(chunk);
       })
       .on("end", () => {
         body = Buffer.concat(bodyParts).toString();
         try {
-          resolve(JSON.parse(body));
+          resolve({ body: JSON.parse(body) });
         } catch (error) {
           console.error("[mcp-proxy] error parsing body", error);
-          resolve(null);
+          resolve({ body: null });
         }
+      })
+      .on("error", (error) => {
+        console.error("[mcp-proxy] error reading body", error);
+        resolve({ body: null });
+      })
+      .on("close", () => {
+        resolve({ body: null });
       });
   });
 };
@@ -82,6 +133,51 @@ const createJsonRpcErrorResponse = (code: number, message: string) => {
     id: null,
     jsonrpc: "2.0",
   });
+};
+
+/**
+ * Answers an over-sized request with a 413 and only then tears the connection
+ * down. Destroying the socket outright - which is all the size check can do on
+ * its own - leaves the client with a bare ECONNRESET and no way to tell a size
+ * limit from a crash.
+ */
+const sendPayloadTooLarge = ({
+  maxBodySize,
+  req,
+  res,
+}: {
+  readonly maxBodySize: number;
+  readonly req: http.IncomingMessage;
+  readonly res: http.ServerResponse;
+}) => {
+  console.error(
+    `[mcp-proxy] request body too large (exceeds ${maxBodySize} bytes)`,
+  );
+
+  // Stop consuming immediately so a client that keeps sending applies TCP
+  // backpressure instead of growing this process's buffers.
+  req.pause();
+
+  if (res.headersSent) {
+    req.destroy();
+
+    return;
+  }
+
+  res.setHeader("Connection", "close");
+  res.setHeader("Content-Type", "application/json");
+
+  // Destroy only once the response has flushed, otherwise the socket can go
+  // away before the client ever sees the 413.
+  res.writeHead(413).end(
+    createJsonRpcErrorResponse(
+      -32600,
+      `Payload Too Large: request body exceeds ${maxBodySize} bytes`,
+    ),
+    () => {
+      req.destroy();
+    },
+  );
 };
 
 type SessionUnauthorizedResponseOptions = {
@@ -401,6 +497,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   endpoint,
   eventStore,
   eventStoreMaxEvents,
+  maxBodySize,
   oauth,
   onClose,
   onConnect,
@@ -419,6 +516,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   endpoint: string;
   eventStore?: EventStoreOption;
   eventStoreMaxEvents?: number;
+  maxBodySize?: MaxBodySizeOption;
   oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
@@ -443,7 +541,15 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       let server: T;
 
-      body = await getBody(req);
+      const bodyResult = await getBody(req, maxBodySize);
+
+      if (bodyResult.tooLarge) {
+        sendPayloadTooLarge({ maxBodySize: bodyResult.limit, req, res });
+
+        return true;
+      }
+
+      body = bodyResult.body;
 
       // Per-request authentication for all requests
       // Store authResult to update existing sessions with fresh auth context
@@ -987,6 +1093,11 @@ const handleSSERequest = async <T extends ServerLike>({
       return true;
     }
 
+    // `maxBodySize` deliberately does not reach here: the SDK reads and parses
+    // this body itself, so the proxy never buffers it and has nothing to cap.
+    // The SSE endpoint is therefore bounded by whatever limit the SDK applies,
+    // not by the stream endpoint's. Front this with a gateway limit if you need
+    // the two to match.
     await activeTransport.handlePostMessage(req, res);
 
     return true;
@@ -1005,6 +1116,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   eventStoreMaxEvents,
   host = "::",
   keepAliveTimeout = DEFAULT_KEEP_ALIVE_TIMEOUT,
+  maxBodySize,
   oauth,
   onClose,
   onConnect,
@@ -1040,6 +1152,16 @@ export const startHTTPServer = async <T extends ServerLike>({
   eventStoreMaxEvents?: number;
   host?: string;
   keepAliveTimeout?: number;
+  /**
+   * Caps how many bytes of a request body the stream endpoint buffers,
+   * bounding the memory a single request can consume. A request over the cap
+   * is answered with `413 Payload Too Large` and the connection is closed.
+   * Default: 10485760 (10 MiB). Pass `false` to disable the cap entirely
+   * (unbounded buffering - only safe behind a gateway that already limits body
+   * size). Does not apply to the SSE endpoint, whose POST bodies are read by
+   * the MCP SDK.
+   */
+  maxBodySize?: MaxBodySizeOption;
   oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
@@ -1147,6 +1269,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         endpoint: streamEndpoint,
         eventStore,
         eventStoreMaxEvents,
+        maxBodySize,
         oauth,
         onClose,
         onConnect,
