@@ -4,8 +4,8 @@
  * This server intentionally delays responses to test timeout behavior.
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { Server } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { setTimeout as delay } from "node:timers/promises";
 
 const server = new Server(
@@ -24,14 +24,7 @@ const server = new Server(
 // Configure delay via environment variable or default to 2 seconds
 const RESPONSE_DELAY = parseInt(process.env.RESPONSE_DELAY || "2000", 10);
 
-import {
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-
-server.setRequestHandler(ListResourcesRequestSchema, async () => {
+server.setRequestHandler("resources/list", async () => {
   await delay(RESPONSE_DELAY);
   return {
     resources: [
@@ -43,7 +36,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
+server.setRequestHandler("resources/read", async ({ params }) => {
   await delay(RESPONSE_DELAY);
   return {
     contents: [
@@ -55,7 +48,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
   };
 });
 
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+server.setRequestHandler("tools/list", async () => {
   await delay(RESPONSE_DELAY);
   return {
     tools: [
@@ -75,7 +68,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
+server.setRequestHandler("tools/call", async ({ params }) => {
   await delay(RESPONSE_DELAY);
   return {
     content: [

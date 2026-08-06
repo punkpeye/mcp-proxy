@@ -3,8 +3,7 @@
  * https://github.com/modelcontextprotocol/typescript-sdk/blob/main/src/examples/shared/inMemoryEventStore.ts
  */
 
-import type { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import type { EventStore, JSONRPCMessage } from "@modelcontextprotocol/server";
 
 // A stream accumulates one event per server->client message (e.g. every
 // tool call on a stateful session opens its own stream). With no cap, a

@@ -1,4 +1,4 @@
-import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import type { JSONRPCMessage } from "@modelcontextprotocol/server";
 
 import { describe, expect, it, vi } from "vitest";
 
