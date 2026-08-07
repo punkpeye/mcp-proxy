@@ -326,7 +326,7 @@ describe("getUpstreamBridge", () => {
     );
   }, 20000);
 
-  it("does not wait out a pending backoff on close", async () => {
+  it("does not reopen behind a close that landed mid-backoff", async () => {
     const stub = createStubClient({ era: "modern" });
     const bridge = getUpstreamBridge({ client: asClient(stub) });
 
@@ -347,11 +347,16 @@ describe("getUpstreamBridge", () => {
 
     await bridge.close();
 
+    // Inert against today's code, because the reopen loop is detached from the
+    // mutation queue and `close()` only ever waits on that. Kept because it is
+    // the one thing that would notice the loop being serialized behind the
+    // queue - which does not deadlock, so nothing else would.
     expect(Date.now() - startedAt).toBeLessThan(250);
 
     const afterClose = stub.listen.mock.calls.length;
 
-    // And the backoff does not come back to life behind the close.
+    // The backoff therefore outlives the bridge. Expiring afterwards must not
+    // open a stream nobody owns and nothing would ever close.
     await new Promise((resolve) => setTimeout(resolve, 1200));
 
     expect(stub.listen.mock.calls.length).toBe(afterClose);

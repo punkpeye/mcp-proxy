@@ -160,9 +160,6 @@ const createBridge = ({
   let reopenAttempts = 0;
   let subscription: Awaited<ReturnType<Client["listen"]>> | undefined;
 
-  /** Settles a reopen backoff early; set only while one is pending. */
-  let cancelReopenDelay: (() => void) | undefined;
-
   /**
    * Opening a stream is not atomic, so concurrent callers - several downstream
    * connections subscribing at once, or a subscribe racing a `resources/
@@ -177,26 +174,22 @@ const createBridge = ({
     return queue;
   };
 
+  /**
+   * The backoff between reopen attempts.
+   *
+   * Unref'd because a shutdown can land mid-window: the loop is detached from
+   * the mutation queue, so nothing on the close path awaits this, and a ref'd
+   * timer would keep the event loop alive past the CLI's graceful-shutdown
+   * budget and exit non-zero.
+   *
+   * Cancelling it on close would change no behaviour - `reopenUntilLive`
+   * re-reads `closed` on the far side and `reopenListenStream` refuses again
+   * under it. It would only release this closure, and the `client` it
+   * captures, before the window runs out; the longest is eight seconds.
+   */
   const delayReopen = (ms: number) =>
     new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        cancelReopenDelay = undefined;
-
-        resolve();
-      }, ms);
-
-      // Unref'd so a pending backoff never holds the process open by itself. A
-      // shutdown landing inside the window would otherwise keep the event loop
-      // alive past the CLI's graceful-shutdown budget and exit non-zero.
-      timer.unref();
-
-      cancelReopenDelay = () => {
-        clearTimeout(timer);
-
-        cancelReopenDelay = undefined;
-
-        resolve();
-      };
+      setTimeout(resolve, ms).unref();
     });
 
   /**
@@ -371,11 +364,6 @@ const createBridge = ({
       closed = true;
       sinks.clear();
       refcounts.clear();
-
-      // A pending backoff is unref'd and already gives up once `closed` is set,
-      // so this only stops `close()` from returning while one is still counting
-      // down behind it.
-      cancelReopenDelay?.();
 
       // Otherwise a later `getUpstreamBridge(client)` hands back this closed
       // bridge, whose `ensureListenStream` no-ops - silently unsubscribable.
