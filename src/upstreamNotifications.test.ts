@@ -375,6 +375,34 @@ describe("getUpstreamBridge", () => {
 
       expect(stub.listen).toHaveBeenCalledTimes(1);
     });
+
+    it(`opens a fresh stream for a later subscriber after a ${reason} close`, async () => {
+      const stub = createStubClient({ era: "modern" });
+      const bridge = getUpstreamBridge({ client: asClient(stub) });
+
+      bridge.subscribe({ toolsListChanged: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(stub.listen).toHaveBeenCalledTimes(1);
+      });
+
+      stub.dropStream(0, reason);
+
+      // Let the close observer run before the next subscriber arrives, so the
+      // assertion cannot pass on microtask ordering alone.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      // Not reopening on this reason is deliberate, but the ended stream must
+      // not be left standing in for a live one. `ensureListenStream` would then
+      // read the bridge as already listening, so no later connection could open
+      // a replacement - an upstream restart would silently end change delivery
+      // for every downstream client that only wants `list_changed`.
+      bridge.subscribe({ toolsListChanged: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(stub.listen).toHaveBeenCalledTimes(2);
+      });
+    });
   }
 
   it("gives up rather than spinning on a stream that keeps dropping", async () => {

@@ -208,22 +208,42 @@ const createBridge = ({
 
     const openedAt = Date.now();
 
+    // Two separate questions, and conflating them wedges the bridge: whether
+    // this stream is still live, and whether to chase a replacement.
+    //
+    // A terminated stream is not live whatever ended it, so `subscription` is
+    // cleared whenever this stream is still the one holding it. Leaving it set
+    // for the reasons we deliberately do not reopen on would make
+    // `ensureListenStream` read a dead stream as a live one, so no later
+    // `subscribe()` could open a replacement - that is every new downstream
+    // connection, silently, until something reopens by another route
+    // (`subscribeUpstream`/`unsubscribeUpstream` do, unconditionally, so a
+    // deployment that changes resource subscriptions recovers on its own and
+    // one that only wants `list_changed` never does).
+    //
     // Only `'remote'` is an unexpected disconnect worth reopening: `'local'` is
     // our own `close()` and `'graceful'` is the server ending the subscription
-    // deliberately. Reopening on either of those chases a connection that is
-    // going away on purpose - which on a normal shutdown means logging a drop
-    // and then failing to reconnect to a client that has already closed.
-    //
-    // The SDK does not re-listen on its own, and nothing else would notice:
-    // `subscription` would stay set, so `ensureListenStream` would consider the
-    // stream live and every later change notification would be lost silently.
+    // deliberately by answering the listen request, which the SDK's own servers
+    // do on shutdown. Chasing either means reconnecting to a peer that is going
+    // away on purpose; a later `subscribe()` opens a fresh stream instead.
     void opened.closed
       .then(async (reason) => {
-        if (closed || subscription !== opened || reason !== "remote") {
+        // A newer stream already replaced this one, and owns `subscription`.
+        if (closed || subscription !== opened) {
           return;
         }
 
         subscription = undefined;
+
+        if (reason !== "remote") {
+          if (reason === "graceful") {
+            console.error(
+              "[mcp-proxy] upstream ended the subscriptions/listen stream; change notifications are off until a new downstream connection or a resource-subscription change opens another",
+            );
+          }
+
+          return;
+        }
 
         if (Date.now() - openedAt >= LISTEN_STABLE_AFTER) {
           reopenAttempts = 0;
