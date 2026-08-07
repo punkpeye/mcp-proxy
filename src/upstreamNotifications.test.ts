@@ -426,6 +426,34 @@ describe("getUpstreamBridge", () => {
     expect(stub.listen.mock.calls.length).toBeLessThanOrEqual(4);
   }, 20000);
 
+  it("does not wait out an in-flight upstream call on close", async () => {
+    const stub = createStubClient({ era: "modern", listenDelayMs: 5000 });
+    const bridge = getUpstreamBridge({ client: asClient(stub) });
+
+    bridge.subscribe({ toolsListChanged: vi.fn() });
+
+    // Let the open take the queue before the close lands behind it.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const startedAt = Date.now();
+
+    await bridge.close();
+
+    // The queue is holding a `listen()` bounded by `requestTimeout` - five
+    // minutes by default - against a five second graceful-shutdown budget.
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+
+    // Not waiting for the queue is not abandoning it: the teardown still runs
+    // behind the returned promise, so the stream the close overtook is torn
+    // down too - just after the caller has its shutdown budget back.
+    await vi.waitFor(
+      () => {
+        expect(stub.closes).toEqual([1]);
+      },
+      { timeout: 8000 },
+    );
+  }, 20000);
+
   it("does not hand back a closed bridge", async () => {
     const stub = createStubClient({ era: "modern" });
     const bridge = getUpstreamBridge({ client: asClient(stub) });

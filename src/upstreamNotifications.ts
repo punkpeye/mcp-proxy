@@ -66,6 +66,25 @@ const MAX_LISTEN_REOPEN_ATTEMPTS = 6;
 const LISTEN_STABLE_AFTER = 30_000;
 
 /**
+ * How long `close()` waits for the mutation queue to drain before giving up on
+ * it.
+ *
+ * Queue items run in series, so the wait is their sum, and several of them are
+ * upstream round trips: a `listen()` waiting on its ack and
+ * `resources/(un)subscribe` are bounded by `requestTimeout` - five minutes by
+ * default - while `McpSubscription.close()` sends `notifications/cancelled`
+ * through the transport under no timeout at all. The CLI's entire
+ * graceful-shutdown budget is five seconds, so waiting the queue out turns a
+ * clean exit into `process.exit(1)`. Whatever is still in flight is settled by
+ * the `client.close()` that follows, which tears the transport down under it.
+ *
+ * Matches `FORCE_CLOSE_GRACE_PERIOD` in `startHTTPServer`. Both are literals
+ * while `--gracefulShutdownTimeout` is user-settable, so a budget below a
+ * couple of seconds is already spoken for before either of them yields.
+ */
+const CLOSE_TEARDOWN_TIMEOUT = 1_000;
+
+/**
  * Change notifications reach a 2025-era client unsolicited, but a 2026-07-28
  * server sends them only on a `subscriptions/listen` stream the client opened.
  * The SDK dispatches both onto the same `setNotificationHandler` registrations,
@@ -363,11 +382,30 @@ const createBridge = ({
       bridges.delete(client);
 
       // Queued so an in-flight open finishes first and its stream is the one
-      // torn down, rather than being left behind by a close that ran past it.
-      await enqueue(async () => {
+      // torn down, rather than being left behind by a close that ran past it -
+      // but only waited on for as long as that is cheap. Past the deadline the
+      // queue keeps draining behind the returned promise, so the stream is
+      // still torn down and any queued lease work still runs; `close()` just
+      // stops holding the caller's shutdown budget open for it.
+      const drained = enqueue(async () => {
         await subscription?.close();
         subscription = undefined;
+      }).catch((error: unknown) => {
+        console.error(
+          "[mcp-proxy] error tearing down the upstream subscriptions/listen stream",
+          error,
+        );
       });
+
+      await Promise.race([
+        drained,
+        new Promise<void>((resolve) => {
+          // Unref'd so the deadline never keeps the process alive on its own.
+          // It only has to fire while something else already does: a queue that
+          // has not drained means an upstream round trip is still in flight.
+          setTimeout(resolve, CLOSE_TEARDOWN_TIMEOUT).unref();
+        }),
+      ]);
     },
     subscribe: (sink) => {
       sinks.add(sink);
