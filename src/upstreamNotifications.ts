@@ -21,6 +21,14 @@ export type UpstreamBridge = {
  */
 export type UpstreamLease = {
   addResourceSubscription: (uri: string) => Promise<void>;
+  /**
+   * Whether this lease asked for `uri`.
+   *
+   * The bridge fans an upstream `resources/updated` out to every sink, because
+   * the upstream reports the change once for all of them. Deciding who is
+   * entitled to it is per lease, and this is how a sink asks.
+   */
+  owns: (uri: string) => boolean;
   /** Drops this lease's sink and every resource subscription it still holds. */
   release: () => void;
   removeResourceSubscription: (uri: string) => Promise<void>;
@@ -465,6 +473,7 @@ const createBridge = ({
               throw error;
             }
           }),
+        owns: (uri) => owned.has(uri),
         release: () => {
           sinks.delete(sink);
 

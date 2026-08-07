@@ -1,4 +1,5 @@
 import type {
+  LoggingLevel,
   RequestOptions,
   ServerCapabilities,
   ServerContext,
@@ -21,6 +22,21 @@ const FIRST_MODERN_PROTOCOL_VERSION = "2026-07-28";
  * the 2025-era behavior and the safe default, and suppressing on a maybe would
  * silently drop notifications a client is entitled to.
  */
+/**
+ * Ascending severity, matching the order of the spec's `LoggingLevel` enum -
+ * which is what the SDK derives its own comparison from.
+ */
+const LOG_LEVEL_SEVERITY: Record<LoggingLevel, number> = {
+  alert: 6,
+  critical: 5,
+  debug: 0,
+  emergency: 7,
+  error: 4,
+  info: 1,
+  notice: 2,
+  warning: 3,
+};
+
 const isModernEraConnection = (server: Server): boolean => {
   const version = server.getNegotiatedProtocolVersion();
 
@@ -106,8 +122,29 @@ export const proxyServer = async ({
     });
   };
 
+  /**
+   * The level this connection last asked for, or `undefined` while it has not
+   * asked. Owned here rather than read back off the `Server`: the SDK's
+   * built-in handler files the level under the transport's session id and only
+   * `sendLoggingMessage` consults it, which means honoring it through that API
+   * would mean recovering the same session id on every forwarded message.
+   */
+  let logLevel: LoggingLevel | undefined;
+
   const lease = bridge.subscribe({
     loggingMessage: (params) => {
+      // `logging/setLevel` is answered per connection and never forwarded - one
+      // upstream connection carries one level for every downstream client, so
+      // forwarding would let one of them silence another's logs. Honoring it
+      // is therefore this side's job, and skipping it would leave the method
+      // acknowledged and inert.
+      if (
+        logLevel !== undefined &&
+        LOG_LEVEL_SEVERITY[params.level] < LOG_LEVEL_SEVERITY[logLevel]
+      ) {
+        return;
+      }
+
       forward(() =>
         server.notification({ method: "notifications/message", params }),
       );
@@ -123,6 +160,14 @@ export const proxyServer = async ({
       );
     },
     resourceUpdated: (params) => {
+      // The upstream reports a change once, for every downstream connection
+      // sharing this client. Only the ones that subscribed to the URI are
+      // entitled to hear about it - forwarding to the rest tells a client which
+      // resources someone else is watching, and when they change.
+      if (!lease.owns(params.uri)) {
+        return;
+      }
+
       forward(() =>
         server.notification({
           method: "notifications/resources/updated",
@@ -145,6 +190,20 @@ export const proxyServer = async ({
     lease.release();
     previousOnClose?.();
   };
+
+  if (serverCapabilities?.logging) {
+    // Replaces the `Server`'s built-in handler, which files the level under the
+    // transport's session id, where only `sendLoggingMessage` and
+    // `ctx.mcpReq.log` read it. Same answer on the wire, and the level lands
+    // where the sink above can act on it - but the SDK's own copy stays empty
+    // from here on, so anything else registered on this `Server` that logs
+    // through those APIs is no longer filtered by it.
+    server.setRequestHandler("logging/setLevel", async (request) => {
+      logLevel = request.params.level;
+
+      return {};
+    });
+  }
 
   if (serverCapabilities?.prompts) {
     server.setRequestHandler("prompts/get", async (request, ctx) =>

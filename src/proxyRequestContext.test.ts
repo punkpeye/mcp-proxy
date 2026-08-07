@@ -1,4 +1,7 @@
-import type { ServerCapabilities } from "@modelcontextprotocol/server";
+import type {
+  LoggingLevel,
+  ServerCapabilities,
+} from "@modelcontextprotocol/server";
 
 import {
   Client,
@@ -28,6 +31,8 @@ const TOOLS: Tool[] = [
 type Upstream = {
   aborted: () => boolean;
   client: Client;
+  emitLog: (level: LoggingLevel, data: string) => void;
+  emitResourceUpdated: (uri: string) => void;
   loggingLevel: () => string | undefined;
 };
 
@@ -42,7 +47,7 @@ afterEach(async () => {
 const createUpstream = async (): Promise<Upstream> => {
   const server = new Server(
     { name: "upstream", version: "1.0.0" },
-    { capabilities: { logging: {}, tools: {} } },
+    { capabilities: { logging: {}, resources: { subscribe: true }, tools: {} } },
   );
 
   let aborted = false;
@@ -55,6 +60,9 @@ const createUpstream = async (): Promise<Upstream> => {
 
     return {};
   });
+
+  server.setRequestHandler("resources/subscribe", async () => ({}));
+  server.setRequestHandler("resources/unsubscribe", async () => ({}));
 
   server.setRequestHandler("tools/call", async (request, ctx) => {
     const progressToken = ctx.mcpReq._meta?.progressToken;
@@ -92,6 +100,12 @@ const createUpstream = async (): Promise<Upstream> => {
   return {
     aborted: () => aborted,
     client,
+    emitLog: (level, data) => {
+      void server.sendLoggingMessage({ data, level });
+    },
+    emitResourceUpdated: (uri) => {
+      void server.sendResourceUpdated({ uri });
+    },
     loggingLevel: () => loggingLevel,
   };
 };
@@ -222,5 +236,75 @@ describe("per-request context crosses the proxy", () => {
     expect(upstream.loggingLevel()).toBeUndefined();
 
     await client.close();
+  }, 30000);
+
+  it("applies the connection's logging level to forwarded messages", async () => {
+    const upstream = await createUpstream();
+    const port = await startProxy(upstream);
+    const client = await connect(port, "legacy");
+
+    const received: string[] = [];
+
+    client.setNotificationHandler("notifications/message", async (n) => {
+      received.push(n.params.data as string);
+    });
+
+    await client.setLoggingLevel("error");
+
+    upstream.emitLog("debug", "below-threshold");
+    upstream.emitLog("error", "at-threshold");
+
+    // Because the level is deliberately not forwarded, the upstream keeps
+    // sending everything and the filter has to run on this side. Without it
+    // `logging/setLevel` is answered and then ignored.
+    await vi.waitFor(() => {
+      expect(received).toEqual(["at-threshold"]);
+    });
+
+    await client.close();
+  }, 30000);
+
+  it("delivers resources/updated only to the connection that subscribed", async () => {
+    const upstream = await createUpstream();
+    const port = await startProxy(upstream);
+
+    const watcher = await connect(port, "legacy");
+    const bystander = await connect(port, "legacy");
+
+    const watched: string[] = [];
+    const overheard: string[] = [];
+
+    watcher.setNotificationHandler(
+      "notifications/resources/updated",
+      async (n) => {
+        watched.push(n.params.uri);
+      },
+    );
+
+    bystander.setNotificationHandler(
+      "notifications/resources/updated",
+      async (n) => {
+        overheard.push(n.params.uri);
+      },
+    );
+
+    await watcher.subscribeResource({ uri: "file:///watched.txt" });
+    await bystander.subscribeResource({ uri: "file:///other.txt" });
+
+    upstream.emitResourceUpdated("file:///watched.txt");
+
+    await vi.waitFor(() => {
+      expect(watched).toEqual(["file:///watched.txt"]);
+    });
+
+    // Both connections share one upstream, which reports the change once. A
+    // copy for the bystander would tell it which resources another client is
+    // watching, and when they change.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(overheard).toEqual([]);
+
+    await watcher.close();
+    await bystander.close();
   }, 30000);
 });
