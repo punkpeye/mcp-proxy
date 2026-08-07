@@ -413,6 +413,130 @@ describe("getUpstreamBridge", () => {
     });
   }
 
+  it("retries a first open that rejects outright", async () => {
+    const stub = createStubClient({ era: "modern" });
+
+    stub.failNextListens(1);
+
+    const bridge = getUpstreamBridge({ client: asClient(stub) });
+
+    bridge.subscribe({ toolsListChanged: vi.fn() });
+
+    // Only a stream that opened and then dropped reaches the retry loop, so an
+    // open that rejects has no `closed` observer to start one. A proxy that
+    // came up before its upstream would stay deaf until another connection.
+    await vi.waitFor(
+      () => {
+        expect(stub.listen).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 5000 },
+    );
+  }, 20000);
+
+  it("refills the reopen budget once attempts stop for a while", async () => {
+    // Only `Date`, so the backoff still runs on real timers and the loop takes
+    // the same branches it does in production. The clock the bridge reads is
+    // not real time though: `vi.waitFor` ticks fake timers as it polls, so the
+    // measured delay below runs ahead of the wall clock. That is fine for a
+    // threshold test - it makes the reading more deterministic, not less - but
+    // the number is not milliseconds elapsed.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date"] });
+
+    try {
+      const stub = createStubClient({ era: "modern" });
+      const bridge = getUpstreamBridge({ client: asClient(stub) });
+
+      bridge.subscribe({ toolsListChanged: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(stub.listen).toHaveBeenCalledTimes(1);
+      });
+
+      // Spend three attempts, so a fourth would wait 250 * 2 ** 3 = 2000ms.
+      stub.dropStream(0);
+      await vi.waitFor(() => {
+        expect(stub.listen).toHaveBeenCalledTimes(2);
+      });
+
+      stub.dropStream(1);
+      await vi.waitFor(() => {
+        expect(stub.listen).toHaveBeenCalledTimes(3);
+      });
+
+      stub.dropStream(2);
+
+      // The gap has to land while no stream is open. Jumping the clock over a
+      // live stream would make it look like one that survived
+      // `LISTEN_STABLE_AFTER`, and that reset - not the refill - would be what
+      // hands the budget back, so the test would pass either way.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      vi.setSystemTime(Date.now() + 120_000);
+
+      await vi.waitFor(
+        () => {
+          expect(stub.listen).toHaveBeenCalledTimes(4);
+        },
+        { timeout: 4000 },
+      );
+
+      const droppedAt = Date.now();
+
+      stub.dropStream(3);
+
+      await vi.waitFor(
+        () => {
+          expect(stub.listen).toHaveBeenCalledTimes(5);
+        },
+        { timeout: 6000 },
+      );
+
+      // Back at the base delay instead of continuing the exponent, which is
+      // what proves the budget refilled rather than merely not being spent.
+      expect(Date.now() - droppedAt).toBeLessThan(900);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20000);
+
+  it("does not refill the reopen budget during a drop storm", async () => {
+    const stub = createStubClient({ era: "modern" });
+    const bridge = getUpstreamBridge({ client: asClient(stub) });
+
+    bridge.subscribe({ toolsListChanged: vi.fn() });
+
+    await vi.waitFor(() => {
+      expect(stub.listen).toHaveBeenCalledTimes(1);
+    });
+
+    stub.dropStream(0);
+    await vi.waitFor(() => {
+      expect(stub.listen).toHaveBeenCalledTimes(2);
+    });
+
+    stub.dropStream(1);
+    await vi.waitFor(() => {
+      expect(stub.listen).toHaveBeenCalledTimes(3);
+    });
+
+    const droppedAt = Date.now();
+
+    stub.dropStream(2);
+
+    await vi.waitFor(
+      () => {
+        expect(stub.listen).toHaveBeenCalledTimes(4);
+      },
+      { timeout: 5000 },
+    );
+
+    // Third attempt, so `250 * 2 ** 2`. A refill firing inside the storm would
+    // put this back at the base delay and the cap would never be reached - the
+    // spin it exists to stop. The refill window has to stay long enough that a
+    // storm always outruns it.
+    expect(Date.now() - droppedAt).toBeGreaterThan(700);
+  }, 20000);
+
   it("gives up rather than spinning on a stream that keeps dropping", async () => {
     const stub = createStubClient({ era: "modern" });
     const bridge = getUpstreamBridge({ client: asClient(stub) });

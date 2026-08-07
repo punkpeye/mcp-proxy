@@ -74,6 +74,25 @@ const MAX_LISTEN_REOPEN_ATTEMPTS = 6;
 const LISTEN_STABLE_AFTER = 30_000;
 
 /**
+ * How long the reopen budget has to go unspent before it refills, and how long
+ * after giving up the next storm is scheduled for.
+ *
+ * Without this the cap is not per drop storm but per process. `reopenAttempts`
+ * otherwise resets only when a stream that outlived `LISTEN_STABLE_AFTER` is
+ * the current one and drops `'remote'`, and `openedAt` restarts on every stream
+ * replacement - including the ones a resource-subscription change forces - so a
+ * deployment that changes subscriptions more often than that can never satisfy
+ * it. A bridge that has once spent its budget then gives up on every later drop
+ * having made no attempt at all, however many hours later.
+ *
+ * The window is long enough that the storm the cap exists for spends the budget
+ * well inside it - the six backoffs together come to under sixteen seconds - so
+ * refilling cannot rescue a spin, only an upstream that has since come back.
+ * That bounds the sustained attempt rate to one budget per window.
+ */
+const LISTEN_REOPEN_BUDGET_REFILL = 60_000;
+
+/**
  * How long `close()` waits for the mutation queue to drain before giving up on
  * it.
  *
@@ -165,6 +184,9 @@ const createBridge = ({
   const refcounts = new Map<string, number>();
 
   let closed = false;
+  let lastReopenAttemptAt = 0;
+  /** Set while a post-give-up storm is scheduled; keeps it to one at a time. */
+  let refillTimer: NodeJS.Timeout | undefined;
   let reopenAttempts = 0;
   let subscription: Awaited<ReturnType<Client["listen"]>> | undefined;
 
@@ -303,12 +325,23 @@ const createBridge = ({
    * some unrelated `subscribe()` happened to try again.
    */
   const reopenUntilLive = async () => {
+    // The budget belongs to a drop storm, not to the process. One spent long
+    // enough ago that the upstream has had time to come back must not bar the
+    // attempt that would find it.
+    if (Date.now() - lastReopenAttemptAt >= LISTEN_REOPEN_BUDGET_REFILL) {
+      reopenAttempts = 0;
+    }
+
+    let spent = 0;
+
     while (!closed && reopenAttempts < MAX_LISTEN_REOPEN_ATTEMPTS) {
       // An upstream that accepts a listen and drops it immediately would
       // otherwise spin as fast as the round trip allows.
       const delay = LISTEN_REOPEN_BASE_DELAY * 2 ** reopenAttempts;
 
       reopenAttempts++;
+      spent++;
+      lastReopenAttemptAt = Date.now();
 
       console.error(
         `[mcp-proxy] reopening upstream subscriptions/listen stream in ${delay}ms (attempt ${reopenAttempts}/${MAX_LISTEN_REOPEN_ATTEMPTS})`,
@@ -333,10 +366,33 @@ const createBridge = ({
       }
     }
 
-    if (!closed) {
-      console.error(
-        `[mcp-proxy] gave up reopening the upstream subscriptions/listen stream after ${reopenAttempts} attempts; change notifications are off until a new downstream connection retries`,
-      );
+    // Nothing was tried, so there is nothing to report: this is a caller that
+    // arrived to find the budget already spent. Reporting attempts it did not
+    // make would be a lie repeated once per caller - and on the 2026-07-28 leg
+    // `subscribe()` runs once per HTTP request.
+    if (closed || spent === 0) {
+      return;
+    }
+
+    console.error(
+      `[mcp-proxy] gave up reopening the upstream subscriptions/listen stream after ${spent} attempts; change notifications are off, retrying in ${LISTEN_REOPEN_BUDGET_REFILL}ms`,
+    );
+
+    // Scheduled rather than left for the next caller, because after a give-up
+    // there is no stream left to drop and start one. A deployment with a single
+    // long-lived connection - `startStdioServer`, or the CLI's own bus
+    // subscriber - would otherwise never consult the refill and stay deaf for
+    // good, which is the failure this whole path exists to end.
+    if (refillTimer === undefined) {
+      refillTimer = setTimeout(() => {
+        refillTimer = undefined;
+
+        void reopenUntilLive();
+      }, LISTEN_REOPEN_BUDGET_REFILL);
+
+      // Unref'd for the same reason the backoff is: a shutdown landing inside
+      // the window must not hold the process past its graceful-shutdown budget.
+      refillTimer.unref();
     }
   };
 
@@ -372,6 +428,11 @@ const createBridge = ({
       closed = true;
       sinks.clear();
       refcounts.clear();
+
+      // A scheduled storm is unref'd and gives up once `closed` is set, so this
+      // only stops it lingering behind a bridge nobody holds.
+      clearTimeout(refillTimer);
+      refillTimer = undefined;
 
       // Otherwise a later `getUpstreamBridge(client)` hands back this closed
       // bridge, whose `ensureListenStream` no-ops - silently unsubscribable.
@@ -414,6 +475,12 @@ const createBridge = ({
           "[mcp-proxy] could not open upstream subscriptions/listen stream",
           error,
         );
+
+        // An open that rejects leaves no stream, so no `closed` observer will
+        // ever start the retry loop - only a stream that opened and then
+        // dropped reaches it. Without this a proxy that came up before its
+        // upstream stays deaf to changes until another connection happens by.
+        void reopenUntilLive();
       });
 
       const owned = new Set<string>();
