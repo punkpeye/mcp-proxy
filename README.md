@@ -62,15 +62,22 @@ rather than half-solved.
   request comes back as the `input_required` result of the very call the proxy
   forwarded, so that direction is a question of scope rather than of
   correlation. It is simply not implemented yet.
-- **Log messages to a 2026-07-28 client.** That revision delivers
-  `notifications/message` only for a request that asked for one, and the client
-  surface the proxy forwards through offers no per-request log callback to relay
-  it — an upstream log arrives with nothing to attribute it to. 2025-era clients
-  still receive them, from either upstream era.
-- **`logging/setLevel`** is answered locally and not forwarded: the shared
-  upstream carries one level, so forwarding would let one client raise or
-  silence another's logs, and the method does not exist on a 2026-07-28 upstream
-  at all.
+- **Log messages, on both sides of a 2026-07-28 connection.** That revision
+  carries logs per request: a client asks for them in a request's `_meta`, and
+  the server answers on that request's own stream. The proxy can do neither
+  half. Downstream, the client surface it forwards through offers no
+  per-request log callback and its notification handlers are passed nothing to
+  attribute a log to; upstream, it has no way to ask for logs in the first
+  place, so a 2026-07-28 server's per-request logging never fires. What still
+  reaches a 2025-era client is the deprecated unsolicited path — everything
+  from a 2025-era upstream, and from a 2026-07-28 upstream only whatever it
+  sends outside the per-request channel, which a conformant one will not use.
+- **`logging/setLevel` upstream.** The method is answered per downstream
+  connection and honored there — messages below the level a connection asked
+  for are not forwarded to it — but never passed on: the shared upstream
+  carries one level, so forwarding would let one client raise or silence
+  another's logs, and the method does not exist on a 2026-07-28 upstream at
+  all.
 - **Client identity.** The upstream sees `mcp-proxy` as its client, not the
   downstream caller — so does any telemetry keyed on it.
 - **2026-07-28 over stdio.** `startStdioServer` serves 2025-era clients only;
@@ -508,10 +515,15 @@ Options:
 
 > [!NOTE]
 > One `proxyServer` call serves one downstream connection, but they share a
-> single upstream client, so upstream notifications reach **every** connected
-> client. If you derive per-request identity in `createServer` to serve several
-> tenants from one proxy, note that `notifications/message` and
-> `notifications/resources/updated` are not partitioned by tenant.
+> single upstream client, so an upstream notification is received once and
+> offered to **every** connected client. Two are narrowed before they are
+> forwarded: `notifications/resources/updated` reaches only the connections
+> that subscribed to that URI, and `notifications/message` only those whose
+> `logging/setLevel` admits it — a connection that never set one still gets
+> everything. The `list_changed` notifications are not
+> narrowed — they describe the one upstream, which every connection is looking
+> at. If you derive per-request identity in `createServer` to serve several
+> tenants from one proxy, that is the line to check against your model.
 
 #### `startHTTPServer`
 
