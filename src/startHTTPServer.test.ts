@@ -3004,3 +3004,90 @@ it("buffers a request body without limit when maxBodySize is false", async () =>
     await httpServer.close();
   }
 }, 30_000);
+
+it("returns 500 instead of crashing when connecting the server fails on the stateless path", async () => {
+  // Regression test: the stream POST paths called `server.connect(transport)`
+  // without awaiting it. `Protocol.connect()` returns a promise, so a
+  // rejection escaped the `try`/`catch` that wraps the whole handler, became
+  // an unhandled rejection and killed the process on Node >= 15 instead of
+  // producing the 500 the catch block is there to produce.
+  //
+  // The trigger used here is the one a user hits by accident: `createServer`
+  // handing back a shared `Server` instance. That is a natural thing to do in
+  // stateless mode, and the second request makes `Protocol.connect()` throw
+  // "Already connected to a transport" on its very first line.
+  const port = await getRandomPort();
+
+  const unhandledRejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const sharedServer = new Server(
+    { name: "test", version: "1.0.0" },
+    { capabilities: {} },
+  );
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => sharedServer,
+    port,
+    stateless: true,
+  });
+
+  const postToMcp = (body: unknown) =>
+    fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify(body),
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+  try {
+    const first = await postToMcp({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2025-03-26",
+      },
+    });
+    expect(first.status).toBe(200);
+    await first.body?.cancel();
+
+    // A second initialize takes the same branch as the first one and calls
+    // connect() on the now already-connected server.
+    const secondInitialize = await postToMcp({
+      id: 2,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2025-03-26",
+      },
+    });
+    await secondInitialize.body?.cancel();
+
+    // A request with no session id that is not an initialize takes the other
+    // branch, which had the same missing await.
+    const ping = await postToMcp({ id: 3, jsonrpc: "2.0", method: "ping" });
+    await ping.body?.cancel();
+
+    // Give any rejection a tick to surface before asserting.
+    await delay(100);
+
+    expect(unhandledRejections).toEqual([]);
+    expect(secondInitialize.status).toBe(500);
+    expect(ping.status).toBe(500);
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+    process.off("unhandledRejection", onUnhandledRejection);
+  }
+}, 15_000);
