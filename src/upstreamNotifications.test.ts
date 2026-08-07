@@ -20,9 +20,18 @@ const createStubClient = ({
   const closes: number[] = [];
   const drops: ((reason: string) => void)[] = [];
 
+  /** How many of the next `listen()` calls reject instead of opening. */
+  let failNextListens = 0;
+
   const listen = vi.fn(async (filter: unknown) => {
     if (listenDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, listenDelayMs));
+    }
+
+    if (failNextListens > 0) {
+      failNextListens--;
+
+      throw new Error("transient upstream failure");
     }
 
     const index = listen.mock.calls.length;
@@ -54,6 +63,10 @@ const createStubClient = ({
     dropStream: (index: number, reason = "remote") => drops[index]?.(reason),
     emit: (method: string, params?: unknown) => {
       handlers.get(method)?.({ method, params });
+    },
+    /** Makes the next `count` `listen()` calls reject rather than open. */
+    failNextListens: (count: number) => {
+      failNextListens = count;
     },
     getProtocolEra: () => era,
     getServerCapabilities: () => ({
@@ -286,6 +299,63 @@ describe("getUpstreamBridge", () => {
       resourceSubscriptions: ["file:///a"],
     });
   });
+
+  it("keeps spending the budget after a reopen attempt that itself fails", async () => {
+    const stub = createStubClient({ era: "modern" });
+    const bridge = getUpstreamBridge({ client: asClient(stub) });
+
+    bridge.subscribe({ toolsListChanged: vi.fn() });
+
+    await vi.waitFor(() => {
+      expect(stub.listen).toHaveBeenCalledTimes(1);
+    });
+
+    // The reopen rejects outright rather than opening a stream that later
+    // drops, so there is no next `closed` to hang the following attempt off.
+    // Retrying only from a successful open would stop the loop dead here and
+    // leave change delivery off until some unrelated `subscribe()` retried.
+    stub.failNextListens(1);
+
+    stub.dropStream(0);
+
+    await vi.waitFor(
+      () => {
+        expect(stub.listen).toHaveBeenCalledTimes(3);
+      },
+      { timeout: 5000 },
+    );
+  }, 20000);
+
+  it("does not wait out a pending backoff on close", async () => {
+    const stub = createStubClient({ era: "modern" });
+    const bridge = getUpstreamBridge({ client: asClient(stub) });
+
+    bridge.subscribe({ toolsListChanged: vi.fn() });
+
+    await vi.waitFor(() => {
+      expect(stub.listen).toHaveBeenCalledTimes(1);
+    });
+
+    stub.failNextListens(4);
+
+    stub.dropStream(0);
+
+    // Land inside a backoff window, with most of it still to run.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const startedAt = Date.now();
+
+    await bridge.close();
+
+    expect(Date.now() - startedAt).toBeLessThan(250);
+
+    const afterClose = stub.listen.mock.calls.length;
+
+    // And the backoff does not come back to life behind the close.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+
+    expect(stub.listen.mock.calls.length).toBe(afterClose);
+  }, 20000);
 
   for (const reason of ["local", "graceful"] as const) {
     it(`does not reopen after a ${reason} close`, async () => {

@@ -141,6 +141,9 @@ const createBridge = ({
   let reopenAttempts = 0;
   let subscription: Awaited<ReturnType<Client["listen"]>> | undefined;
 
+  /** Settles a reopen backoff early; set only while one is pending. */
+  let cancelReopenDelay: (() => void) | undefined;
+
   /**
    * Opening a stream is not atomic, so concurrent callers - several downstream
    * connections subscribing at once, or a subscribe racing a `resources/
@@ -154,6 +157,28 @@ const createBridge = ({
 
     return queue;
   };
+
+  const delayReopen = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        cancelReopenDelay = undefined;
+
+        resolve();
+      }, ms);
+
+      // Unref'd so a pending backoff never holds the process open by itself. A
+      // shutdown landing inside the window would otherwise keep the event loop
+      // alive past the CLI's graceful-shutdown budget and exit non-zero.
+      timer.unref();
+
+      cancelReopenDelay = () => {
+        clearTimeout(timer);
+
+        cancelReopenDelay = undefined;
+
+        resolve();
+      };
+    });
 
   /**
    * The listen filter is fixed at open time, so changing the subscribed set
@@ -204,31 +229,7 @@ const createBridge = ({
           reopenAttempts = 0;
         }
 
-        if (reopenAttempts >= MAX_LISTEN_REOPEN_ATTEMPTS) {
-          console.error(
-            `[mcp-proxy] upstream subscriptions/listen stream dropped ${reopenAttempts} times; giving up`,
-          );
-
-          return;
-        }
-
-        // An upstream that accepts a listen and drops it immediately would
-        // otherwise spin as fast as the round trip allows.
-        const delay = LISTEN_REOPEN_BASE_DELAY * 2 ** reopenAttempts;
-
-        reopenAttempts++;
-
-        console.error(
-          `[mcp-proxy] upstream subscriptions/listen stream dropped; reopening in ${delay}ms`,
-        );
-
-        await new Promise((resolve) => setTimeout(resolve, delay));
-
-        if (closed) {
-          return;
-        }
-
-        return ensureListenStream();
+        await reopenUntilLive();
       })
       .catch((error: unknown) => {
         console.error(
@@ -250,6 +251,54 @@ const createBridge = ({
 
       await reopenListenStream();
     });
+
+  /**
+   * Spends the reopen budget until a stream is live again.
+   *
+   * Looping here rather than scheduling one attempt: the attempt itself can
+   * fail - a `listen()` that rejects outright, not only a stream that opened and
+   * then dropped - and hanging the next attempt off the next stream's `closed`
+   * would end the retry there, because there is no next stream. One transient
+   * failure would then leave the budget unspent and change delivery dead until
+   * some unrelated `subscribe()` happened to try again.
+   */
+  const reopenUntilLive = async () => {
+    while (!closed && reopenAttempts < MAX_LISTEN_REOPEN_ATTEMPTS) {
+      // An upstream that accepts a listen and drops it immediately would
+      // otherwise spin as fast as the round trip allows.
+      const delay = LISTEN_REOPEN_BASE_DELAY * 2 ** reopenAttempts;
+
+      reopenAttempts++;
+
+      console.error(
+        `[mcp-proxy] reopening upstream subscriptions/listen stream in ${delay}ms (attempt ${reopenAttempts}/${MAX_LISTEN_REOPEN_ATTEMPTS})`,
+      );
+
+      await delayReopen(delay);
+
+      if (closed) {
+        return;
+      }
+
+      try {
+        await ensureListenStream();
+
+        // Live again - the new stream's own observer owns what happens next.
+        return;
+      } catch (error) {
+        console.error(
+          "[mcp-proxy] could not reopen upstream subscriptions/listen stream",
+          error,
+        );
+      }
+    }
+
+    if (!closed) {
+      console.error(
+        `[mcp-proxy] gave up reopening the upstream subscriptions/listen stream after ${reopenAttempts} attempts; change notifications are off until a new downstream connection retries`,
+      );
+    }
+  };
 
   /**
    * `resources/subscribe` does not exist on a 2026-07-28 upstream; there the
@@ -283,6 +332,11 @@ const createBridge = ({
       closed = true;
       sinks.clear();
       refcounts.clear();
+
+      // A pending backoff is unref'd and already gives up once `closed` is set,
+      // so this only stops `close()` from returning while one is still counting
+      // down behind it.
+      cancelReopenDelay?.();
 
       // Otherwise a later `getUpstreamBridge(client)` hands back this closed
       // bridge, whose `ensureListenStream` no-ops - silently unsubscribable.
