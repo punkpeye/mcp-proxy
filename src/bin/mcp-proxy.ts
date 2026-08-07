@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
+import { Client } from "@modelcontextprotocol/client";
+import { Server, ServerCapabilities } from "@modelcontextprotocol/server";
 import { EventSource } from "eventsource";
 import { createRequire } from "node:module";
 import { setTimeout } from "node:timers";
@@ -15,8 +14,20 @@ const require = createRequire(import.meta.url);
 const packageJson = require("../../package.json") as { version: string };
 
 import { proxyServer } from "../proxyServer.js";
-import { SSEServer, startHTTPServer } from "../startHTTPServer.js";
+import {
+  DEFAULT_ALLOWED_HEADERS,
+  SSEServer,
+  startHTTPServer,
+} from "../startHTTPServer.js";
+import {
+  resolveVersionNegotiation,
+  UpstreamProtocol,
+} from "../startStdioServer.js";
 import { StdioClientTransport } from "../StdioClientTransport.js";
+import {
+  acquireListenSubscriptions,
+  getUpstreamBridge,
+} from "../upstreamNotifications.js";
 
 util.inspect.defaultOptions.depth = 8;
 
@@ -103,6 +114,12 @@ const argv = await yargs(hideBin(process.argv))
         "Maximum request body size in bytes accepted by the stream endpoint; larger requests are answered with 413 Payload Too Large. Bounds the memory a single request can consume (default: 10 MiB). Set to 0 to disable the limit",
       type: "number",
     },
+    modern: {
+      default: true,
+      describe:
+        "Serve MCP protocol revision 2026-07-28 on the stream endpoint alongside the 2025-era revisions. Each request is classified by its own content, so one endpoint serves both and neither client needs to know the other exists. Use --no-modern to serve only 2025-era clients. Has no effect with --server sse, which disables the stream endpoint the leg lives on",
+      type: "boolean",
+    },
     port: {
       default: 8080,
       describe: "The port to listen on",
@@ -162,6 +179,13 @@ const argv = await yargs(hideBin(process.argv))
       describe: "Request a specific subdomain for the tunnel (availability not guaranteed)",
       type: "string",
     },
+    upstreamProtocol: {
+      choices: ["legacy", "auto", "modern"],
+      default: "legacy",
+      describe:
+        "Which MCP protocol revision to speak to the spawned server. 'legacy' (default) uses the 2025 initialize handshake. 'auto' sends server/discover first and falls back to the handshake — needed to front a 2026-07-28 server, at the cost of one extra round trip, and of sending that probe to a server that may not expect it. 'modern' requires 2026-07-28 and fails against an older server",
+      type: "string",
+    },
   })
   .help()
   .parseAsync();
@@ -179,17 +203,6 @@ if (!(argv.maxBodySize >= 0)) {
   );
   process.exit(1);
 }
-
-// Default Access-Control-Allow-Headers list — must stay in sync with
-// `defaultCorsOptions.allowedHeaders` in src/startHTTPServer.ts.
-const DEFAULT_ALLOWED_HEADERS = [
-  "Content-Type",
-  "Authorization",
-  "Accept",
-  "Mcp-Session-Id",
-  "Mcp-Protocol-Version",
-  "Last-Event-Id",
-];
 
 const corsOption =
   argv.corsAddAllowedHeader && argv.corsAddAllowedHeader.length > 0
@@ -246,6 +259,9 @@ const proxy = async () => {
     },
     {
       capabilities: {},
+      versionNegotiation: resolveVersionNegotiation(
+        argv.upstreamProtocol as UpstreamProtocol,
+      ),
     },
   );
 
@@ -265,7 +281,7 @@ const proxy = async () => {
       capabilities: serverCapabilities,
     });
 
-    proxyServer({
+    await proxyServer({
       client,
       requestTimeout: argv.requestTimeout,
       server,
@@ -284,6 +300,15 @@ const proxy = async () => {
     host: argv.host,
     keepAliveTimeout: argv.keepAliveTimeout,
     maxBodySize: argv.maxBodySize === 0 ? false : argv.maxBodySize,
+    modern: argv.modern,
+    // A 2026-07-28 client asks for resource updates through its listen filter,
+    // not `resources/subscribe`, so this is the only place those URIs surface.
+    onListenSubscriptions: (uris) =>
+      acquireListenSubscriptions({
+        client,
+        requestTimeout: argv.requestTimeout,
+        uris,
+      }),
     port: argv.port,
     sseEndpoint:
       argv.server && argv.server !== "sse"
@@ -297,6 +322,17 @@ const proxy = async () => {
       argv.server && argv.server !== "stream"
         ? null
         : (argv.streamEndpoint ?? argv.endpoint),
+  });
+
+  // A 2026-07-28 client receives change notifications only on a
+  // `subscriptions/listen` stream, which no per-request server instance owns -
+  // they are published to the handler's bus instead. The 2025-era legs get the
+  // same events through their own long-lived `Server`, wired by `proxyServer`.
+  getUpstreamBridge({ client, requestTimeout: argv.requestTimeout }).subscribe({
+    promptsListChanged: () => server.notify.promptsChanged(),
+    resourcesListChanged: () => server.notify.resourcesChanged(),
+    resourceUpdated: ({ uri }) => server.notify.resourceUpdated(uri),
+    toolsListChanged: () => server.notify.toolsChanged(),
   });
 
   let tunnel: Awaited<ReturnType<typeof pipenet>> | undefined;
@@ -314,6 +350,17 @@ const proxy = async () => {
   return {
     close: async () => {
       await server.close();
+
+      // Tear the upstream subscription stream down before the client, so a
+      // 2026-07-28 upstream sees a clean cancel rather than a dropped socket.
+      await getUpstreamBridge({ client }).close();
+
+      // Closing the upstream client is what terminates the spawned server
+      // process and releases its stdio pipes. Without it the event loop stays
+      // alive after the HTTP server is down and every shutdown runs out the
+      // graceful-shutdown timer and exits non-zero.
+      await client.close();
+
       if (tunnel) {
         await tunnel.close();
       }
@@ -325,7 +372,7 @@ const createGracefulShutdown = ({
   server,
   timeout,
 }: {
-  server: SSEServer;
+  server: Pick<SSEServer, "close">;
   timeout: number;
 }) => {
   const gracefulShutdown = () => {

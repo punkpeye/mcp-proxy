@@ -1,5 +1,4 @@
-import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { JSONRPCMessage, Transport } from "@modelcontextprotocol/server";
 
 type TransportEvent =
   | {

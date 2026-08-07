@@ -1,12 +1,5 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 const server = new Server(
   {
@@ -20,7 +13,7 @@ const server = new Server(
   },
 );
 
-server.setRequestHandler(ListResourcesRequestSchema, async () => {
+server.setRequestHandler("resources/list", async () => {
   return {
     resources: [
       {
@@ -31,7 +24,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+server.setRequestHandler("resources/read", async (request) => {
   if (request.params.uri === "file:///example.txt") {
     return {
       contents: [
@@ -47,7 +40,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   }
 });
 
-server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+server.setRequestHandler("resources/templates/list", async () => {
   return {
     resourceTemplates: [
       {
@@ -59,11 +52,11 @@ server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(SubscribeRequestSchema, async () => {
+server.setRequestHandler("resources/subscribe", async () => {
   return {};
 });
 
-server.setRequestHandler(UnsubscribeRequestSchema, async () => {
+server.setRequestHandler("resources/unsubscribe", async () => {
   return {};
 });
 
