@@ -751,7 +751,7 @@ const handleStreamRequest = async <T extends ServerLike>({
           return true;
         }
 
-        server.connect(transport);
+        await server.connect(transport);
 
         if (onConnect) {
           await onConnect(server);
@@ -818,7 +818,7 @@ const handleStreamRequest = async <T extends ServerLike>({
           return true;
         }
 
-        server.connect(transport);
+        await server.connect(transport);
 
         if (onConnect) {
           await onConnect(server);
