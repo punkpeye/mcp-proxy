@@ -55,12 +55,22 @@ rather than half-solved.
 
 - **Anything that asks the client for input** (elicitation, sampling, roots).
   The upstream connection declares one set of client capabilities and one
-  identity for all callers, and a 2025-era server's request for input carries
-  nothing identifying which caller it belongs to. Guessing means showing one
-  user's prompt to another, so the proxy does not guess.
-- **`logging/setLevel`** is answered locally and not forwarded, for the same
-  reason: the shared upstream carries one level, so forwarding would let one
-  client raise or silence another's logs.
+  identity for all callers. A 2025-era server pushes its request for input out
+  of band, carrying nothing that says which caller it belongs to, so relaying it
+  means guessing whose screen to put the prompt on — and the proxy does not
+  guess. A 2026-07-28 upstream is not ambiguous in the same way: there the
+  request comes back as the `input_required` result of the very call the proxy
+  forwarded, so that direction is a question of scope rather than of
+  correlation. It is simply not implemented yet.
+- **Log messages to a 2026-07-28 client.** That revision delivers
+  `notifications/message` only for a request that asked for one, and the client
+  surface the proxy forwards through offers no per-request log callback to relay
+  it — an upstream log arrives with nothing to attribute it to. 2025-era clients
+  still receive them, from either upstream era.
+- **`logging/setLevel`** is answered locally and not forwarded: the shared
+  upstream carries one level, so forwarding would let one client raise or
+  silence another's logs, and the method does not exist on a 2026-07-28 upstream
+  at all.
 - **Client identity.** The upstream sees `mcp-proxy` as its client, not the
   downstream caller — so does any telemetry keyed on it.
 - **2026-07-28 over stdio.** `startStdioServer` serves 2025-era clients only;
