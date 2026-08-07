@@ -26,4 +26,7 @@ export type {
   UpstreamLease,
   UpstreamNotificationSink,
 } from "./upstreamNotifications.js";
-export { getUpstreamBridge } from "./upstreamNotifications.js";
+export {
+  acquireListenSubscriptions,
+  getUpstreamBridge,
+} from "./upstreamNotifications.js";

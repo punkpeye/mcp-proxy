@@ -24,7 +24,10 @@ import {
   UpstreamProtocol,
 } from "../startStdioServer.js";
 import { StdioClientTransport } from "../StdioClientTransport.js";
-import { getUpstreamBridge } from "../upstreamNotifications.js";
+import {
+  acquireListenSubscriptions,
+  getUpstreamBridge,
+} from "../upstreamNotifications.js";
 
 util.inspect.defaultOptions.depth = 8;
 
@@ -300,18 +303,12 @@ const proxy = async () => {
     modern: argv.modern,
     // A 2026-07-28 client asks for resource updates through its listen filter,
     // not `resources/subscribe`, so this is the only place those URIs surface.
-    onListenSubscriptions: async (uris) => {
-      const lease = getUpstreamBridge({
+    onListenSubscriptions: (uris) =>
+      acquireListenSubscriptions({
         client,
         requestTimeout: argv.requestTimeout,
-      }).subscribe({});
-
-      await Promise.all(uris.map((uri) => lease.addResourceSubscription(uri)));
-
-      return () => {
-        lease.release();
-      };
-    },
+        uris,
+      }),
     port: argv.port,
     sseEndpoint:
       argv.server && argv.server !== "sse"

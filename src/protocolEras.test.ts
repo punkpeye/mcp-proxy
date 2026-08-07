@@ -15,7 +15,10 @@ import {
   UpstreamProtocol,
 } from "./startStdioServer.js";
 import { StdioClientTransport } from "./StdioClientTransport.js";
-import { getUpstreamBridge } from "./upstreamNotifications.js";
+import {
+  acquireListenSubscriptions,
+  getUpstreamBridge,
+} from "./upstreamNotifications.js";
 
 /**
  * Every case here spawns a `tsx` child as the upstream server, and vitest runs
@@ -91,16 +94,10 @@ const startProxy = async ({
     },
     modern,
     // The same wiring `bin/mcp-proxy.ts` performs for a 2026-07-28 client's
-    // listen filter, which is where its resource subscriptions arrive.
-    onListenSubscriptions: async (uris) => {
-      const lease = getUpstreamBridge({ client }).subscribe({});
-
-      await Promise.all(uris.map((uri) => lease.addResourceSubscription(uri)));
-
-      return () => {
-        lease.release();
-      };
-    },
+    // listen filter, which is where its resource subscriptions arrive - the
+    // shipped function rather than a copy of it, so this covers what runs.
+    onListenSubscriptions: (uris) =>
+      acquireListenSubscriptions({ client, uris }),
     port,
   });
 

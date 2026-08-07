@@ -2,7 +2,10 @@ import type { Client } from "@modelcontextprotocol/client";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { getUpstreamBridge } from "./upstreamNotifications.js";
+import {
+  acquireListenSubscriptions,
+  getUpstreamBridge,
+} from "./upstreamNotifications.js";
 
 /**
  * A stand-in for the upstream `Client`. Only the surface the bridge touches is
@@ -468,6 +471,47 @@ describe("getUpstreamBridge", () => {
     // A closed bridge's `ensureListenStream` no-ops forever, so returning the
     // memoized one would leave the caller silently unable to subscribe.
     expect(getUpstreamBridge({ client: asClient(stub) })).not.toBe(bridge);
+  });
+
+  it("releases what it took when a listen filter is only partly accepted", async () => {
+    const stub = createStubClient();
+
+    stub.subscribeResource.mockImplementation(async ({ uri }) => {
+      if (uri === "file:///denied.txt") {
+        throw new Error("upstream refused the subscription");
+      }
+
+      return { uri };
+    });
+
+    await expect(
+      acquireListenSubscriptions({
+        client: asClient(stub),
+        // The denial goes first, so the two behind it are still queued when it
+        // rejects. Releasing on the rejection alone gives back only what had
+        // been taken by then, and the rest subscribe into a lease nobody holds.
+        uris: [
+          "file:///denied.txt",
+          "file:///first.txt",
+          "file:///second.txt",
+        ],
+      }),
+    ).rejects.toThrow("upstream refused");
+
+    // A hook that throws never hands its caller a release, and the stream the
+    // filter belonged to is never served, so no teardown runs either. Anything
+    // the upstream did accept is held for good unless it is given back here.
+    await vi.waitFor(() => {
+      expect(stub.unsubscribeResource).toHaveBeenCalledWith(
+        { uri: "file:///first.txt" },
+        undefined,
+      );
+
+      expect(stub.unsubscribeResource).toHaveBeenCalledWith(
+        { uri: "file:///second.txt" },
+        undefined,
+      );
+    });
   });
 
   it("tears the stream down on close", async () => {

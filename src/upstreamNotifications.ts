@@ -492,6 +492,49 @@ const createBridge = ({
   };
 };
 
+/**
+ * An `onListenSubscriptions` handler for a proxy fronting `client`.
+ *
+ * A 2026-07-28 client asks for resource updates through its `subscriptions/
+ * listen` filter rather than `resources/subscribe`, so those URIs surface only
+ * through that hook. Acquiring them is all-or-nothing: a filter the upstream
+ * only partly accepts gives back what it took, because a hook that throws
+ * never returns the release its caller would have used.
+ */
+export const acquireListenSubscriptions = async ({
+  client,
+  requestTimeout,
+  uris,
+}: {
+  client: Client;
+  requestTimeout?: number;
+  uris: string[];
+}): Promise<() => void> => {
+  const lease = getUpstreamBridge({ client, requestTimeout }).subscribe({});
+
+  // Settled rather than `Promise.all`, which rejects on the first failure while
+  // its siblings are still on the bridge's queue. Releasing then snapshots an
+  // `owned` set that has not finished growing, and every URI queued behind the
+  // failure is subscribed after the release and held for good.
+  const outcomes = await Promise.allSettled(
+    uris.map((uri) => lease.addResourceSubscription(uri)),
+  );
+
+  const failed = outcomes.find(
+    (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected",
+  );
+
+  if (failed) {
+    lease.release();
+
+    throw failed.reason;
+  }
+
+  return () => {
+    lease.release();
+  };
+};
+
 export const getUpstreamBridge = ({
   client,
   requestTimeout,
