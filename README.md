@@ -54,30 +54,26 @@ downstream connection onto a **single** upstream connection — and are called o
 rather than half-solved.
 
 - **Anything that asks the client for input** (elicitation, sampling, roots).
-  The upstream connection declares one set of client capabilities and one
-  identity for all callers. A 2025-era server pushes its request for input out
-  of band, carrying nothing that says which caller it belongs to, so relaying it
-  means guessing whose screen to put the prompt on — and the proxy does not
-  guess. A 2026-07-28 upstream is not ambiguous in the same way: there the
-  request comes back as the `input_required` result of the very call the proxy
-  forwarded, so that direction is a question of scope rather than of
-  correlation. It is simply not implemented yet.
+  A 2025-era server pushes its request out of band, carrying nothing that says
+  which caller it belongs to, so relaying it means guessing whose screen to put
+  the prompt on. A 2026-07-28 upstream is not ambiguous that way — the request
+  comes back as the `input_required` result of the call the proxy forwarded —
+  so that direction is a question of scope, not correlation. Not implemented
+  yet.
 - **Log messages, on both sides of a 2026-07-28 connection.** That revision
-  carries logs per request: a client asks for them in a request's `_meta`, and
-  the server answers on that request's own stream. The proxy can do neither
-  half. Downstream, the client surface it forwards through offers no
-  per-request log callback and its notification handlers are passed nothing to
-  attribute a log to; upstream, it has no way to ask for logs in the first
-  place, so a 2026-07-28 server's per-request logging never fires. What still
-  reaches a 2025-era client is the deprecated unsolicited path — everything
-  from a 2025-era upstream, and from a 2026-07-28 upstream only whatever it
-  sends outside the per-request channel, which a conformant one will not use.
-- **`logging/setLevel` upstream.** The method is answered per downstream
-  connection and honored there — messages below the level a connection asked
-  for are not forwarded to it — but never passed on: the shared upstream
-  carries one level, so forwarding would let one client raise or silence
-  another's logs, and the method does not exist on a 2026-07-28 upstream at
-  all.
+  carries logs per request: the client asks in a request's `_meta`, the server
+  answers on that request's stream. The proxy can do neither half — downstream
+  it has no per-request log callback and its notification handlers are passed
+  nothing to attribute a log to; upstream it cannot ask for logs at all, so a
+  2026-07-28 server's per-request logging never fires. 2025-era clients still
+  get the deprecated unsolicited path: everything from a 2025-era upstream, and
+  from a 2026-07-28 upstream only what it sends outside the per-request
+  channel, which a conformant one will not use.
+- **`logging/setLevel` upstream.** Answered and honored per downstream
+  connection — messages below the level a connection asked for are not
+  forwarded to it — but never passed on: the shared upstream carries one level,
+  so forwarding would let one client silence another's logs, and the method
+  does not exist on a 2026-07-28 upstream at all.
 - **Client identity.** The upstream sees `mcp-proxy` as its client, not the
   downstream caller — so does any telemetry keyed on it.
 - **2026-07-28 over stdio.** `startStdioServer` serves 2025-era clients only;
@@ -99,21 +95,15 @@ npm install mcp-proxy
 
 ### Command-line
 
-MCP Proxy supports two invocation patterns:
-
-**Simple usage (no mcp-proxy options):**
-
 ```bash
+# no mcp-proxy options
 npx mcp-proxy npx -y @anthropic/mcp-server-filesystem /path
-```
 
-**With mcp-proxy options:**
-
-```bash
+# with mcp-proxy options
 npx mcp-proxy --port 8080 --shell -- tsx server.js
 ```
 
-This starts a server and `stdio` server (`tsx server.js`). The server listens on port 8080 and `/mcp` (streamable HTTP) and `/sse` (SSE) endpoints, and forwards messages to the `stdio` server.
+The second spawns `tsx server.js` over `stdio` and serves it on port 8080 at `/mcp` (streamable HTTP) and `/sse` (SSE).
 
 > [!NOTE]
 > **About the `--` separator:**
@@ -128,16 +118,16 @@ options:
 - `--endpoint`: If `server` is set to `sse` or `stream`, this option sets the endpoint path (default: `/sse` or `/mcp`)
 - `--sseEndpoint`: Set the SSE endpoint path (default: `/sse`). Overrides `--endpoint` if `server` is set to `sse`.
 - `--streamEndpoint`: Set the streamable HTTP endpoint path (default: `/mcp`). Overrides `--endpoint` if `server` is set to `stream`.
-- `--stateless`: Enable stateless mode for HTTP streamable transport (no session management). In this mode, each request creates a new server instance instead of maintaining persistent sessions. Applies to the 2025-era leg; protocol revision 2026-07-28 is per-request by construction.
+- `--stateless`: Create a fresh server instance per request instead of maintaining sessions. Applies to the 2025-era leg; 2026-07-28 is per-request by construction.
 - `--modern`: Serve protocol revision 2026-07-28 on the streamable HTTP endpoint alongside the 2025-era revisions (default: `true`). Use `--no-modern` to serve only 2025-era clients. See [Protocol revisions](#protocol-revisions).
 - `--upstreamProtocol`: Which protocol revision to speak to the spawned server — `legacy` (default), `auto`, or `modern`. See [Protocol revisions](#protocol-revisions).
 - `--port`: Specify the port to listen on (default: 8080)
-- `--connectionTimeout`: Timeout in milliseconds for the initial connection to the MCP server (default: 60000, which is 60 seconds)
-- `--requestTimeout`: Timeout in milliseconds for requests to the MCP server (default: 300000, which is 5 minutes)
-- `--keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000, which is 5 minutes)
-- `--eventStore`: Enable the streamable HTTP transport's resumability event store, which lets clients replay missed messages after a reconnect (default: `true`). Use `--no-eventStore` to disable it entirely for request/response-only deployments that don't need replay and would rather avoid the memory overhead. See [Resumability and memory use](#resumability-and-memory-use).
+- `--connectionTimeout`: Timeout in milliseconds for the initial connection to the MCP server (default: 60000)
+- `--requestTimeout`: Timeout in milliseconds for requests to the MCP server (default: 300000)
+- `--keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000)
+- `--eventStore`: Enable the resumability event store, letting clients replay missed messages after a reconnect (default: `true`). `--no-eventStore` disables it. See [Resumability and memory use](#resumability-and-memory-use).
 - `--eventStoreMaxEvents`: Maximum number of buffered events the resumability event store retains per session before it evicts the oldest (default: 1000). Ignored when `--no-eventStore` is set.
-- `--maxBodySize`: Maximum request body size in bytes accepted by the streamable HTTP endpoint; larger requests are answered with `413 Payload Too Large` (default: 10485760, which is 10 MiB). Set to `0` to disable the limit. See [Request body size](#request-body-size).
+- `--maxBodySize`: Maximum request body size in bytes accepted by the streamable HTTP endpoint; larger requests are answered with `413 Payload Too Large` (default: 10485760, 10 MiB). Set to `0` to disable the limit. See [Request body size](#request-body-size).
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
 - `--apiKey`: API key for authenticating requests (uses X-API-Key header)
@@ -150,31 +140,23 @@ options:
 
 ### Troubleshooting Python stdio servers
 
-If a Python stdio MCP server times out with an error such as `Expected server to respond to ping`, make sure Python is running in unbuffered mode. Buffered stdout can delay MCP JSON-RPC messages long enough for the proxy to treat the server as unresponsive.
-
-Use `python -u` when launching the server:
+If a Python stdio server times out with `Expected server to respond to ping`, run Python unbuffered — buffered stdout can delay JSON-RPC messages long enough for the proxy to treat the server as unresponsive:
 
 ```bash
 npx mcp-proxy -- python -u -m your_package.mcp_server
+# or: PYTHONUNBUFFERED=1 npx mcp-proxy -- python -m your_package.mcp_server
 ```
 
-Alternatively, set `PYTHONUNBUFFERED=1`:
-
-```bash
-PYTHONUNBUFFERED=1 npx mcp-proxy -- python -m your_package.mcp_server
-```
-
-MCP stdio servers should also reserve stdout for protocol messages. Send logs, warnings, and other diagnostic output to stderr, and use `--debug` when you need proxy-side logs.
+stdio servers should also reserve stdout for protocol messages — send diagnostics to stderr, and use `--debug` for proxy-side logs.
 
 ### Public Tunnel
 
-MCP Proxy can expose your local server to the public internet using a tunnel service. This is useful for testing webhooks, sharing your development server, or accessing your MCP server from anywhere.
+Expose a local server to the public internet — useful for testing webhooks, sharing a dev server, or remote access.
 
 ```bash
-# Expose your MCP server via a public tunnel
 npx mcp-proxy --port 8080 --tunnel -- tsx server.js
 
-# Request a specific subdomain
+# request a specific subdomain
 npx mcp-proxy --port 8080 --tunnel --tunnelSubdomain myapp -- tsx server.js
 ```
 
@@ -187,104 +169,50 @@ tunnel established at https://abcdefghij.tunnel.gla.ma
 > [!NOTE]
 > The requested subdomain may not be available. The actual URL will be displayed when the tunnel is established.
 
-This feature is powered by [pipenet](https://github.com/punkpeye/pipenet) and sponsored by [glama.ai](https://glama.ai). For more information, see the [pipenet announcement](https://glama.ai/blog/2026-01-19-pipenet).
+Powered by [pipenet](https://github.com/punkpeye/pipenet), sponsored by [glama.ai](https://glama.ai) — see the [announcement](https://glama.ai/blog/2026-01-19-pipenet).
 
 ### Stateless Mode
 
-By default, MCP Proxy maintains persistent sessions for HTTP streamable transport, where each client connection is associated with a server instance that stays alive for the duration of the session.
-
-Stateless mode (`--stateless`) changes this behavior:
-
-- **No session management**: Each request creates a new server instance instead of maintaining persistent sessions
-- **Simplified deployment**: Useful for serverless environments or when you want to minimize memory usage
-- **Request isolation**: Each request is completely independent, which can be beneficial for certain use cases
-
-Example usage:
+By default each client connection holds a server instance for the life of its session. `--stateless` creates a fresh instance per request instead, so requests are fully independent — which suits serverless platforms, load-balanced deployments, and anywhere you'd rather not hold connection state.
 
 ```bash
-# Enable stateless mode
 npx mcp-proxy --port 8080 --stateless -- tsx server.js
 
-# Stateless mode with stream-only transport
+# stream-only transport
 npx mcp-proxy --port 8080 --stateless --server stream -- tsx server.js
 ```
 
 > [!NOTE]
 > Stateless mode only affects HTTP streamable transport (`/mcp` endpoint). SSE transport behavior remains unchanged.
 
-**When to use stateless mode:**
-
-- **Serverless environments**: When deploying to platforms like AWS Lambda, Vercel, or similar
-- **Load balancing**: When requests need to be distributed across multiple instances
-- **Memory optimization**: When you want to minimize server memory usage
-- **Request isolation**: When you need complete independence between requests
-- **Simple deployments**: When you don't need to maintain connection state
-
 ### API Key Authentication
 
-MCP Proxy supports optional API key authentication to secure your endpoints. When enabled, clients must provide a valid API key in the `X-API-Key` header to access the proxy.
-
-#### Enabling Authentication
-
-Authentication is disabled by default for backward compatibility. To enable it, provide an API key via:
-
-**Command-line:**
+Optional and off by default. When enabled, clients must send a valid key in the `X-API-Key` header.
 
 ```bash
 npx mcp-proxy --port 8080 --apiKey "your-secret-key" -- tsx server.js
-```
 
-**Environment variable:**
-
-```bash
+# or via the environment
 export MCP_PROXY_API_KEY="your-secret-key"
 npx mcp-proxy --port 8080 -- tsx server.js
 ```
 
-#### Client Configuration
-
-Clients must include the API key in the `X-API-Key` header:
+Clients pass it as a transport header:
 
 ```typescript
-// For streamable HTTP transport
 const transport = new StreamableHTTPClientTransport(
   new URL("http://localhost:8080/mcp"),
-  {
-    headers: {
-      "X-API-Key": "your-secret-key",
-    },
-  },
+  { headers: { "X-API-Key": "your-secret-key" } },
 );
-
-// For SSE transport
-const transport = new SSEClientTransport(new URL("http://localhost:8080/sse"), {
-  headers: {
-    "X-API-Key": "your-secret-key",
-  },
-});
 ```
 
-#### Exempt Endpoints
-
-The following endpoints do not require authentication:
-
-- `/ping` - Health check endpoint
-- `OPTIONS` requests - CORS preflight requests
-
-#### Security Notes
-
-- **Use HTTPS in production**: API keys should only be transmitted over secure connections
-- **Keep keys secure**: Never commit API keys to version control
-- **Generate strong keys**: Use cryptographically secure random strings for API keys
-- **Rotate keys regularly**: Change API keys periodically for better security
+`/ping` and `OPTIONS` preflights are exempt. Keys travel in a header, so serve over HTTPS in production.
 
 ### CORS Configuration
 
-MCP Proxy provides flexible CORS (Cross-Origin Resource Sharing) configuration to control how browsers can access your MCP server from different origins.
-
 #### Default Behavior
 
-By default, CORS is enabled with the following settings:
+CORS is enabled by default with:
 
 - **Origin**: `*` (allow all origins)
 - **Methods**: `GET, POST, OPTIONS`
@@ -298,146 +226,40 @@ browser clients on that revision need them allowed. That revision's
 express — if your tools declare `x-mcp-header` parameters, add those header
 names explicitly with `--corsAddAllowedHeader` or `allowedHeaders`.
 
-#### Basic Configuration
+#### Configuration
 
-```typescript
-import { startHTTPServer } from "mcp-proxy";
-
-// Use default CORS settings (backward compatible)
-await startHTTPServer({
-  createServer: async () => {
-    /* ... */
-  },
-  port: 3000,
-});
-
-// Explicitly enable default CORS
-await startHTTPServer({
-  createServer: async () => {
-    /* ... */
-  },
-  port: 3000,
-  cors: true,
-});
-
-// Disable CORS completely
-await startHTTPServer({
-  createServer: async () => {
-    /* ... */
-  },
-  port: 3000,
-  cors: false,
-});
-```
-
-#### Advanced CORS Configuration
-
-For more control over CORS behavior, you can provide a detailed configuration:
+`cors: true` (or omitted) uses the defaults, `cors: false` disables it, and a
+`CorsOptions` object overrides individual fields:
 
 ```typescript
 import { startHTTPServer, CorsOptions } from "mcp-proxy";
 
-const corsOptions: CorsOptions = {
-  // Allow specific origins
-  origin: ["https://app.example.com", "https://admin.example.com"],
+const cors: CorsOptions = {
+  // A list, or a function for dynamic validation
+  origin: ["https://app.example.com"],
+  methods: ["GET", "POST", "OPTIONS"],
 
-  // Or use a function for dynamic origin validation
-  origin: (origin: string) => origin.endsWith(".example.com"),
-
-  // Specify allowed methods
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-
-  // Allow any headers (useful for browser clients with custom headers)
+  // "*" allows any header — the usual fix for browser preflight failures.
+  // Listing headers instead REPLACES the defaults, so restate the protocol's
+  // own: dropping Mcp-Method/Mcp-Name breaks browser clients on 2026-07-28.
   allowedHeaders: "*",
 
-  // Or specify exact headers. Replacing the defaults means restating the
-  // protocol's own headers - dropping Mcp-Method/Mcp-Name breaks browser
-  // clients on protocol revision 2026-07-28.
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "Accept",
-    "Mcp-Session-Id",
-    "Mcp-Protocol-Version",
-    "Last-Event-Id",
-    "Mcp-Method",
-    "Mcp-Name",
-    "X-Custom-Header",
-    "X-API-Key",
-  ],
-
-  // Headers to expose to the client
-  exposedHeaders: ["Mcp-Session-Id", "X-Total-Count"],
-
-  // Allow credentials
+  exposedHeaders: ["Mcp-Session-Id"],
   credentials: true,
-
-  // Cache preflight requests for 24 hours
   maxAge: 86400,
 };
 
-await startHTTPServer({
-  createServer: async () => {
-    /* ... */
-  },
-  port: 3000,
-  cors: corsOptions,
-});
+await startHTTPServer({ cors, createServer, port: 3000 });
 ```
 
-#### Common Use Cases
-
-**Allow any custom headers (solves browser CORS issues):**
-
-```typescript
-await startHTTPServer({
-  createServer: async () => {
-    /* ... */
-  },
-  port: 3000,
-  cors: {
-    allowedHeaders: "*", // Allows X-Custom-Header, X-API-Key, etc.
-  },
-});
-```
-
-**Restrict to specific domains:**
-
-```typescript
-await startHTTPServer({
-  createServer: async () => {
-    /* ... */
-  },
-  port: 3000,
-  cors: {
-    origin: ["https://myapp.com", "https://admin.myapp.com"],
-    allowedHeaders: "*",
-  },
-});
-```
-
-**Development-friendly settings:**
-
-```typescript
-await startHTTPServer({
-  createServer: async () => {
-    /* ... */
-  },
-  port: 3000,
-  cors: {
-    origin: ["http://localhost:3000", "http://localhost:5173"], // Common dev ports
-    allowedHeaders: "*",
-    credentials: true,
-  },
-});
-```
+Upgrading from 5.5.6 or earlier, where headers were wildcarded automatically?
+Set `allowedHeaders: "*"` to restore that behavior.
 
 #### CLI: adding allowed headers
 
-The CLI exposes a single `--corsAddAllowedHeader` flag that appends to the
-default `Access-Control-Allow-Headers` list (defaults preserved). The most
-common use is unblocking the browser preflight for a custom auth header when
-the proxy is started with `--apiKey`:
+`--corsAddAllowedHeader` appends to the default `Access-Control-Allow-Headers`
+list, keeping the defaults. Repeat it to add more. The common use is unblocking
+the browser preflight for a custom auth header under `--apiKey`:
 
 ```bash
 npx mcp-proxy --port 8080 --apiKey secret \
@@ -445,38 +267,10 @@ npx mcp-proxy --port 8080 --apiKey secret \
   -- npx -y @modelcontextprotocol/server-filesystem /srv
 ```
 
-Repeat the flag to add more (`--corsAddAllowedHeader X-API-Key --corsAddAllowedHeader X-Other`).
-For broader CORS overrides (origin allowlist, wildcard headers, disabling CORS),
-use the programmatic `cors` option below.
-
-#### Migration from Older Versions
-
-If you were using mcp-proxy 5.5.6 and want the same permissive behavior in 5.9.0+:
-
-```typescript
-// Old behavior (5.5.6) - automatic wildcard headers
-await startHTTPServer({
-  createServer: async () => {
-    /* ... */
-  },
-  port: 3000,
-});
-
-// New equivalent (5.9.0+) - explicit wildcard headers
-await startHTTPServer({
-  createServer: async () => {
-    /* ... */
-  },
-  port: 3000,
-  cors: {
-    allowedHeaders: "*",
-  },
-});
-```
+For origin allowlists, wildcard headers, or disabling CORS, use the
+programmatic `cors` option above.
 
 ### Node.js SDK
-
-The Node.js SDK provides several utilities that are used to create a proxy.
 
 #### `proxyServer`
 
@@ -552,7 +346,7 @@ Options:
 - `port`: Port number to listen on
 - `host`: Host to bind to (default: "::")
 - `keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000)
-- `maxBodySize`: Caps how many bytes of a request body the streamable HTTP endpoint buffers; larger requests are answered with `413 Payload Too Large` (default: 10485760, which is 10 MiB). Pass `false` to disable the cap. See [Request body size](#request-body-size).
+- `maxBodySize`: Caps how many bytes of a request body the streamable HTTP endpoint buffers; larger requests are answered with `413 Payload Too Large` (default: 10485760, 10 MiB). Pass `false` to disable the cap. See [Request body size](#request-body-size).
 - `sseEndpoint`: SSE endpoint path (default: "/sse", set to null to disable)
 - `streamEndpoint`: Streamable HTTP endpoint path (default: "/mcp", set to null to disable)
 - `stateless`: Enable stateless mode for HTTP streamable transport (default: false). Applies to the 2025-era leg; protocol revision 2026-07-28 is per-request by construction.
@@ -596,26 +390,23 @@ place unconditionally. The `mcp-proxy` CLI does exactly this.
 `getUpstreamBridge(client)` registers the upstream notification handlers once
 per client and fans them out, so several downstream connections can share one
 upstream server. `subscribe(sink)` returns a lease with
-`addResourceSubscription` / `removeResourceSubscription` / `release`; resource
-subscriptions are owned per lease, so one connection unsubscribing never
-cancels a URI another connection still wants, and `release()` drops whatever a
-disconnecting connection still held.
+`addResourceSubscription` / `removeResourceSubscription` / `owns` / `release`.
+Resource subscriptions are owned per lease, so one connection unsubscribing
+never cancels a URI another still wants, and `release()` drops whatever a
+disconnecting connection held.
 
 A 2026-07-28 client asks for resource updates through the `resourceSubscriptions`
-field of its `subscriptions/listen` filter rather than `resources/subscribe`,
-which the serving entry answers itself. Pass `onListenSubscriptions` to act on
-those URIs — the CLI wires it to the same bridge:
+field of its `subscriptions/listen` filter rather than `resources/subscribe`.
+Pass `onListenSubscriptions` to act on those URIs; `acquireListenSubscriptions`
+is the implementation the CLI uses, and acquires them all-or-nothing so a filter
+the upstream only partly accepts does not strand the rest:
 
 ```ts
+import { acquireListenSubscriptions } from "mcp-proxy";
+
 await startHTTPServer({
   createServer,
-  onListenSubscriptions: async (uris) => {
-    const lease = getUpstreamBridge({ client }).subscribe({});
-
-    await Promise.all(uris.map((uri) => lease.addResourceSubscription(uri)));
-
-    return () => lease.release();
-  },
+  onListenSubscriptions: (uris) => acquireListenSubscriptions({ client, uris }),
   port: 8080,
 });
 ```
@@ -623,46 +414,32 @@ await startHTTPServer({
 ##### Resumability and memory use
 
 The streamable HTTP transport can retain server→client messages so a client
-that reconnects with a `Last-Event-ID` can resume where it left off. By
-default, `mcp-proxy` gives each session its own `InMemoryEventStore` capped at
-1000 buffered events (oldest evicted first via `--eventStoreMaxEvents` /
-`eventStoreMaxEvents`), so a long-lived session's memory use stays bounded
-instead of growing for as long as the process runs.
+reconnecting with a `Last-Event-ID` resumes where it left off. Each session gets
+its own `InMemoryEventStore` capped at 1000 events (oldest evicted first, via
+`--eventStoreMaxEvents` / `eventStoreMaxEvents`), so a long-lived session's
+memory stays bounded rather than growing for the life of the process.
 
-If you don't need resume-after-reconnect - for example, a short-lived
-request/response deployment - disable the store entirely with
-`--no-eventStore` (CLI) or `eventStore: false` (library) to drop the
-resumability bookkeeping altogether.
-
-If you need resumability with a larger replay window or one backed by shared
-storage (e.g. Redis) across multiple proxy processes, pass your own
-`EventStore` implementation as `eventStore`; in that case you're responsible
-for bounding its size.
+Don't need resume-after-reconnect? `--no-eventStore` (CLI) or
+`eventStore: false` (library) drops the bookkeeping entirely. For a larger
+replay window or shared storage across processes (e.g. Redis), pass your own
+`EventStore` — you're then responsible for bounding its size.
 
 ##### Request body size
 
-The streamable HTTP endpoint buffers each request body in memory before it
-parses the JSON-RPC message, so a single slow-chunking client could otherwise
-grow the process's memory for as long as it kept sending. `mcp-proxy` caps
-that buffer at 10 MiB by default (`--maxBodySize` / `maxBodySize`).
+The streamable HTTP endpoint buffers each request body before parsing it, so a
+slow-chunking client could otherwise grow the process's memory for as long as it
+kept sending. `mcp-proxy` caps that buffer at 10 MiB (`--maxBodySize` /
+`maxBodySize`). An oversized `Content-Length` is rejected before any body is
+read; a chunked body is cut off as soon as it exceeds the cap. Either way the
+answer is `413 Payload Too Large` with a JSON-RPC error body naming the limit,
+then the connection closes.
 
-A request over the cap is answered with `413 Payload Too Large` and a JSON-RPC
-error body naming the limit, then the connection is closed; the server also
-logs `[mcp-proxy] request body too large`. When the client declares an
-oversized `Content-Length`, it is rejected before any of the body is read; a
-chunked body that declares no size up front is cut off as soon as the bytes
-received exceed the cap.
-
-The default is deliberately generous, because MCP payloads are often large -
-base64-encoded images, documents and long pasted text routinely push a single
-tool call past a megabyte. Raise it if your clients legitimately send more, or
-set it to `0` (CLI) / `false` (library) to disable the cap entirely, which
-restores unbounded buffering and is only safe behind a gateway that already
-limits body size.
-
-The cap applies to the streamable HTTP endpoint only. The SSE endpoint's
-`POST /messages` bodies are read by the MCP SDK, not by `mcp-proxy`, so this
-option does not affect them.
+The default is deliberately generous — base64 images, documents and long pasted
+text routinely push a single tool call past a megabyte. Raise it if your clients
+legitimately send more, or set `0` (CLI) / `false` (library) to disable it,
+which restores unbounded buffering and is only safe behind a gateway that
+already limits body size. The cap does not apply to the SSE endpoint, whose
+`POST /messages` bodies are read by the MCP SDK rather than by `mcp-proxy`.
 
 #### `startStdioServer`
 
