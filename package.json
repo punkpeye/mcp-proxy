@@ -47,7 +47,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^24.10.1",
     "@types/yargs": "^17.0.35",
-    "eslint": "^9.39.1",
+    "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-perfectionist": "^4.15.1",
     "eventsource": "^4.1.0",
@@ -58,10 +58,10 @@
     "prettier": "^3.7.4",
     "semantic-release": "^25.0.2",
     "tsdown": "^0.17.0",
-    "tsx": "^4.21.0",
+    "tsx": "^4.22.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.1",
-    "vitest": "^4.0.15",
+    "vitest": "^4.1.0",
     "yargs": "^18.0.0"
   },
   "tsdown": {
