@@ -1,17 +1,60 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { JSONRPCMessageSchema } from "@modelcontextprotocol/core";
 import {
+  NodeStreamableHTTPServerTransport,
+  toNodeHandler,
+  toWebRequest,
+} from "@modelcontextprotocol/node";
+import {
+  createMcpHandler,
   EventStore,
-  StreamableHTTPServerTransport,
-} from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+  isInitializeRequest,
+  isLegacyRequest,
+  McpHttpHandler,
+  Server,
+  ServerNotifier,
+} from "@modelcontextprotocol/server";
+// The v2 SDK removed the HTTP+SSE transport; `server-legacy` is a frozen copy
+// of the v1 one, published deprecated and receiving no new features. It is the
+// only way to keep serving `/sse`, which 2025-era clients still use. The
+// transport is deprecated as of 2026-07-28 with a twelve-month window - when
+// that closes, this import and the SSE endpoint go with it.
+import { SSEServerTransport } from "@modelcontextprotocol/server-legacy/sse";
 import fs from "fs";
 import http from "http";
 import https from "https";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
 import { AuthConfig, AuthenticationMiddleware } from "./authentication.js";
 import { InMemoryEventStore } from "./InMemoryEventStore.js";
+
+const DEFAULT_KEEP_ALIVE_TIMEOUT = 300_000;
+
+/**
+ * How long `close()` waits for still-running requests before destroying what is
+ * left. Well under the CLI's 5s graceful-shutdown budget, so a forced close
+ * still leaves room for the process to exit cleanly.
+ */
+const FORCE_CLOSE_GRACE_PERIOD = 1_000;
+
+/**
+ * `false` disables the resumability event store entirely (no replay-on-
+ * reconnect, no retained state). Omitted/`undefined` creates a fresh,
+ * bounded `InMemoryEventStore` per session - see `eventStoreMaxEvents`.
+ * Pass an `EventStore` instance to use a shared or custom-backed store.
+ */
+export type EventStoreOption = EventStore | false;
+
+const resolveEventStore = (
+  eventStore: EventStoreOption | undefined,
+  maxEvents: number | undefined,
+): EventStore | undefined => {
+  if (eventStore === false) {
+    return undefined;
+  }
+
+  return eventStore ?? new InMemoryEventStore({ maxEvents });
+};
 
 export interface CorsOptions {
   allowedHeaders?: string | string[]; // Allow string[] or '*' for wildcard
@@ -24,6 +67,23 @@ export interface CorsOptions {
 
 export type SSEServer = {
   close: () => Promise<void>;
+  /**
+   * Publishes a change event to every open 2026-07-28 `subscriptions/listen`
+   * stream. That revision delivers `list_changed` and `resources/updated` only
+   * on a stream the client asked for, so there is no per-connection `Server` to
+   * send them through - they are published here instead.
+   *
+   * A no-op when the modern leg is disabled.
+   */
+  notify: ServerNotifier;
+};
+
+/** Stand-in for `notify` when no modern leg exists to publish to. */
+const NO_MODERN_SUBSCRIBERS: ServerNotifier = {
+  promptsChanged: () => {},
+  resourcesChanged: () => {},
+  resourceUpdated: () => {},
+  toolsChanged: () => {},
 };
 
 type ServerLike = {
@@ -31,22 +91,94 @@ type ServerLike = {
   connect: Server["connect"];
 };
 
-const getBody = (request: http.IncomingMessage) => {
-  return new Promise((resolve) => {
+/**
+ * `Access-Control-Allow-Headers` when CORS is left at its defaults.
+ *
+ * `Mcp-Method`/`Mcp-Name` are required on 2026-07-28 Streamable HTTP POSTs
+ * (SEP-2243); without them a browser client's preflight fails before the
+ * request is ever classified. The revision's `Mcp-Param-*` headers are a
+ * prefix, which `Access-Control-Allow-Headers` cannot express - a deployment
+ * whose tools declare `x-mcp-header` params adds those names explicitly
+ * (`--corsAddAllowedHeader` / `cors.allowedHeaders`).
+ */
+export const DEFAULT_ALLOWED_HEADERS = [
+  "Content-Type",
+  "Authorization",
+  "Accept",
+  "Mcp-Session-Id",
+  "Mcp-Protocol-Version",
+  "Last-Event-Id",
+  "Mcp-Method",
+  "Mcp-Name",
+];
+
+const DEFAULT_MAX_BODY_SIZE = 10_485_760; // 10 MiB
+
+/**
+ * Caps how many bytes of a request body the stream endpoint buffers before it
+ * gives up. `false` (or `0` from the CLI) disables the cap entirely, restoring
+ * unbounded buffering - only do that behind a gateway that already limits body
+ * size. Omitted/`undefined` uses `DEFAULT_MAX_BODY_SIZE`.
+ */
+export type MaxBodySizeOption = false | number;
+
+/**
+ * "Too large" is kept distinct from the `null` that every other unusable body
+ * resolves to, so the caller can answer 413 rather than let it fall through to
+ * the generic 400. The limit travels with the signal so the response can name
+ * it.
+ */
+type BodyResult =
+  | { readonly body: unknown; readonly tooLarge?: never }
+  | { readonly limit: number; readonly tooLarge: true };
+
+const getBody = (
+  request: http.IncomingMessage,
+  maxBodySize: MaxBodySizeOption = DEFAULT_MAX_BODY_SIZE,
+) => {
+  return new Promise<BodyResult>((resolve) => {
+    if (maxBodySize !== false) {
+      // A client that declares its size up front can be rejected before a
+      // single byte of body is read. The streaming check below is still
+      // needed for chunked bodies and for clients that under-declare.
+      const declaredSize = Number(request.headers["content-length"]);
+
+      if (Number.isFinite(declaredSize) && declaredSize > maxBodySize) {
+        resolve({ limit: maxBodySize, tooLarge: true });
+
+        return;
+      }
+    }
+
     const bodyParts: Buffer[] = [];
     let body: string;
+    let size = 0;
     request
       .on("data", (chunk) => {
+        if (maxBodySize !== false) {
+          size += chunk.length;
+          if (size > maxBodySize) {
+            resolve({ limit: maxBodySize, tooLarge: true });
+            return;
+          }
+        }
         bodyParts.push(chunk);
       })
       .on("end", () => {
         body = Buffer.concat(bodyParts).toString();
         try {
-          resolve(JSON.parse(body));
+          resolve({ body: JSON.parse(body) });
         } catch (error) {
           console.error("[mcp-proxy] error parsing body", error);
-          resolve(null);
+          resolve({ body: null });
         }
+      })
+      .on("error", (error) => {
+        console.error("[mcp-proxy] error reading body", error);
+        resolve({ body: null });
+      })
+      .on("close", () => {
+        resolve({ body: null });
       });
   });
 };
@@ -58,6 +190,111 @@ const createJsonRpcErrorResponse = (code: number, message: string) => {
     id: null,
     jsonrpc: "2.0",
   });
+};
+
+/**
+ * Answers an over-sized request with a 413 and only then tears the connection
+ * down. Destroying the socket outright - which is all the size check can do on
+ * its own - leaves the client with a bare ECONNRESET and no way to tell a size
+ * limit from a crash.
+ */
+const sendPayloadTooLarge = ({
+  maxBodySize,
+  req,
+  res,
+}: {
+  readonly maxBodySize: number;
+  readonly req: http.IncomingMessage;
+  readonly res: http.ServerResponse;
+}) => {
+  console.error(
+    `[mcp-proxy] request body too large (exceeds ${maxBodySize} bytes)`,
+  );
+
+  // Stop consuming immediately so a client that keeps sending applies TCP
+  // backpressure instead of growing this process's buffers.
+  req.pause();
+
+  if (res.headersSent) {
+    req.destroy();
+
+    return;
+  }
+
+  res.setHeader("Connection", "close");
+  res.setHeader("Content-Type", "application/json");
+
+  // Destroy only once the response has flushed, otherwise the socket can go
+  // away before the client ever sees the 413.
+  res.writeHead(413).end(
+    createJsonRpcErrorResponse(
+      -32600,
+      `Payload Too Large: request body exceeds ${maxBodySize} bytes`,
+    ),
+    () => {
+      req.destroy();
+    },
+  );
+};
+
+type SessionUnauthorizedResponseOptions = {
+  readonly body?: unknown;
+  readonly oauth?: AuthConfig["oauth"];
+  readonly res: http.ServerResponse;
+};
+
+const getRequestId = (body: unknown): unknown => {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    Array.isArray(body) ||
+    !("id" in body)
+  ) {
+    return null;
+  }
+
+  return body.id;
+};
+
+const isJsonRpcMessage = (message: unknown): boolean => {
+  return JSONRPCMessageSchema.safeParse(message).success;
+};
+
+const isJsonRpcBody = (body: unknown): boolean => {
+  return Array.isArray(body)
+    ? body.every(isJsonRpcMessage)
+    : isJsonRpcMessage(body);
+};
+
+/** `[].every` is vacuously true, so an empty batch passes `isJsonRpcBody`. */
+const isEmptyBatch = (body: unknown): boolean =>
+  Array.isArray(body) && body.length === 0;
+
+/**
+ * The resource URIs a `subscriptions/listen` asked to be notified about, or an
+ * empty list for any other request.
+ */
+const readListenSubscriptions = (body: unknown): string[] => {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    (body as { method?: unknown }).method !== "subscriptions/listen"
+  ) {
+    return [];
+  }
+
+  // The filter travels as `params.notifications`, not `params.filter` - the
+  // latter is the name of the argument `client.listen()` takes, not the wire
+  // field it becomes.
+  const uris = (
+    body as {
+      params?: { notifications?: { resourceSubscriptions?: unknown } };
+    }
+  ).params?.notifications?.resourceSubscriptions;
+
+  return Array.isArray(uris)
+    ? uris.filter((uri): uri is string => typeof uri === "string")
+    : [];
 };
 
 // Helper function to get WWW-Authenticate header value
@@ -121,6 +358,35 @@ const getWWWAuthenticateHeader = (
   }
 
   return `Bearer ${params.join(", ")}`;
+};
+
+const sendSessionUnauthorizedResponse = ({
+  body,
+  oauth,
+  res,
+}: SessionUnauthorizedResponseOptions): void => {
+  const message = "Unauthorized: No valid session ID provided";
+
+  res.setHeader("Content-Type", "application/json");
+
+  const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
+    error: "invalid_token",
+    error_description: message,
+  });
+  if (wwwAuthHeader) {
+    res.setHeader("WWW-Authenticate", wwwAuthHeader);
+  }
+
+  res.writeHead(401).end(
+    JSON.stringify({
+      error: {
+        code: -32000,
+        message,
+      },
+      id: getRequestId(body),
+      jsonrpc: "2.0",
+    }),
+  );
 };
 
 // Helper function to detect scope challenge errors
@@ -190,6 +456,67 @@ const handleResponseError = async (
   return false;
 };
 
+/**
+ * Answers a `createServer` failure. A thrown `Response` is passed through
+ * verbatim (the convention consumers use to reject a request with their own
+ * status and headers); otherwise an auth-shaped message becomes a 401 and
+ * anything else a 500.
+ *
+ * Shared by both eras so a consumer's rejection means the same thing on either
+ * leg - on the 2026-07-28 leg this must run outside the SDK's request handler,
+ * which would otherwise turn any throw into an opaque 500.
+ */
+const handleCreateServerError = async ({
+  body,
+  error,
+  oauth,
+  res,
+}: {
+  body: unknown;
+  error: unknown;
+  oauth?: AuthConfig["oauth"];
+  res: http.ServerResponse;
+}): Promise<void> => {
+  if (await handleResponseError(error, res)) {
+    return;
+  }
+
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const isAuthError =
+    errorMessage.includes("Authentication") ||
+    errorMessage.includes("Invalid JWT") ||
+    errorMessage.includes("Token") ||
+    errorMessage.includes("Unauthorized");
+
+  if (isAuthError) {
+    res.setHeader("Content-Type", "application/json");
+
+    const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
+      error: "invalid_token",
+      error_description: errorMessage,
+    });
+
+    if (wwwAuthHeader) {
+      res.setHeader("WWW-Authenticate", wwwAuthHeader);
+    }
+
+    res.writeHead(401).end(
+      JSON.stringify({
+        error: {
+          code: -32000,
+          message: errorMessage,
+        },
+        id: getRequestId(body),
+        jsonrpc: "2.0",
+      }),
+    );
+
+    return;
+  }
+
+  res.writeHead(500).end("Error creating server");
+};
+
 // Helper function to clean up server resources
 const cleanupServer = async <T extends ServerLike>(
   server: T,
@@ -218,8 +545,7 @@ const applyCorsHeaders = (
 
   // Default CORS configuration for backward compatibility
   const defaultCorsOptions: CorsOptions = {
-    allowedHeaders:
-      "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id",
+    allowedHeaders: DEFAULT_ALLOWED_HEADERS.join(", "),
     credentials: true,
     exposedHeaders: ["Mcp-Session-Id"],
     methods: ["GET", "POST", "OPTIONS"],
@@ -310,6 +636,216 @@ const applyCorsHeaders = (
   }
 };
 
+/**
+ * The 2026-07-28 leg. Kept behind the same endpoint as the 2025-era leg so a
+ * single URL serves both: `handleStreamRequest` classifies each POST and only
+ * reaches `handle` for requests carrying the modern `_meta` envelope.
+ */
+/**
+ * Called with the resource URIs an incoming `subscriptions/listen` asked to be
+ * notified about, and returns a function that releases them.
+ *
+ * The 2026-07-28 revision has no `resources/subscribe`: a client expresses the
+ * same intent through the `resourceSubscriptions` field of its listen filter,
+ * which the serving entry answers itself. A proxy still has to act on it -
+ * otherwise the filter is acknowledged and nothing upstream is ever subscribed,
+ * so the client waits for updates that cannot arrive. The release runs when the
+ * stream ends.
+ */
+export type ListenSubscriptionsHandler = (
+  uris: string[],
+) => Promise<() => void>;
+
+/**
+ * The instance serving one modern request, plus the teardown that releases it.
+ *
+ * `createServer` runs before the handler rather than inside its factory for two
+ * reasons. It lets a throw reach the caller, which answers it exactly as the
+ * 2025-era legs do (a thrown `Response` is honored, an auth-shaped error becomes
+ * a 401) instead of becoming an opaque 500 from inside the SDK. And it puts the
+ * instance's lifetime in our hands: the `subscriptions/listen` path builds an
+ * instance the SDK closes without ever attaching a transport, and `close()` on a
+ * transport-less instance is a no-op that never fires `onclose` - so hanging
+ * teardown off `onclose` alone leaks the instance and everything registered on
+ * it, once per opened stream, forever.
+ */
+type ModernInstance<T> = {
+  server: T;
+  teardown: () => void;
+};
+
+type ModernLeg<T> = {
+  close: () => Promise<void>;
+  /** Throws whatever `createServer` throws, for the caller to answer. */
+  createInstance: (context: {
+    authResult: unknown;
+    body: unknown;
+    req: http.IncomingMessage;
+  }) => Promise<ModernInstance<T>>;
+  handle: (
+    instance: ModernInstance<T>,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    body: unknown,
+  ) => Promise<void>;
+  notify: ServerNotifier;
+};
+
+/**
+ * `createMcpHandler`'s factory is handed an era, not the underlying Node
+ * request, but `createServer` is defined in terms of that request (consumers
+ * derive per-request auth and context from it). `AsyncLocalStorage` carries the
+ * already-built instance across the boundary; the store is established for the
+ * whole `fetch` call, so every async continuation inside the factory sees it.
+ */
+const createModernLeg = <T extends ServerLike>({
+  createServer,
+  onClose,
+  onConnect,
+  onListenSubscriptions,
+}: {
+  createServer: (request: http.IncomingMessage) => Promise<T>;
+  onClose?: (server: T) => Promise<void>;
+  onConnect?: (server: T) => Promise<void>;
+  onListenSubscriptions?: ListenSubscriptionsHandler;
+}): ModernLeg<T> => {
+  const requestContext = new AsyncLocalStorage<ModernInstance<T>>();
+
+  const createInstance = async ({
+    authResult,
+    body,
+    req,
+  }: {
+    authResult: unknown;
+    body: unknown;
+    req: http.IncomingMessage;
+  }): Promise<ModernInstance<T>> => {
+    const server = await createServer(req);
+
+    // Everything below can throw, and by then `createServer` has already
+    // registered whatever it registers - `proxyServer` adds an upstream
+    // notification sink here. Teardown is therefore defined before the first
+    // thing that can fail, so the catch can release the instance instead of
+    // stranding it: nothing else will, because a failed `createInstance` never
+    // reaches `handle`, and `close()` on an instance the SDK never attached a
+    // transport to does not fire `onclose`.
+    const target = server as unknown as Server;
+    const previousOnClose = target.onclose;
+
+    let releaseSubscriptions: (() => void) | undefined;
+    let toreDown = false;
+
+    // Idempotent, because it runs both from the instance's own `onclose` (when
+    // a transport was attached and closed it) and from `handle`'s teardown.
+    const teardown = () => {
+      if (toreDown) {
+        return;
+      }
+
+      toreDown = true;
+
+      releaseSubscriptions?.();
+
+      // Whatever the consumer's `createServer` registered - `proxyServer` uses
+      // this to release its upstream notification sink.
+      previousOnClose?.();
+
+      if (onClose) {
+        void onClose(server).catch((error: unknown) => {
+          console.error("[mcp-proxy] error in onClose", error);
+        });
+      }
+    };
+
+    target.onclose = teardown;
+
+    try {
+      if (onListenSubscriptions) {
+        const listenUris = readListenSubscriptions(body);
+
+        if (listenUris.length > 0) {
+          releaseSubscriptions = await onListenSubscriptions(listenUris);
+        }
+      }
+
+      // Same convention the 2025-era leg uses for a session's auth context;
+      // `authResult` is the consumer's own value, not an SDK `AuthInfo`.
+      if (
+        authResult &&
+        typeof server === "object" &&
+        server !== null &&
+        "updateAuth" in server &&
+        typeof (server as { updateAuth?: unknown }).updateAuth === "function"
+      ) {
+        (server as { updateAuth: (auth: unknown) => void }).updateAuth(
+          authResult,
+        );
+      }
+
+      if (onConnect) {
+        await onConnect(server);
+      }
+    } catch (error) {
+      await server.close().catch(() => undefined);
+
+      teardown();
+
+      throw error;
+    }
+
+    return { server, teardown };
+  };
+
+  const handler: McpHttpHandler = createMcpHandler(
+    () => {
+      const instance = requestContext.getStore();
+
+      if (!instance) {
+        throw new Error(
+          "[mcp-proxy] modern handler invoked outside of a request context",
+        );
+      }
+
+      // `ServerLike` is structural; the factory contract wants the real class,
+      // which is what every caller actually passes.
+      return instance.server as unknown as Server;
+    },
+    {
+      // The 2025-era leg below is sessionful, so the entry must not also serve
+      // legacy traffic - `handleStreamRequest` routes it there instead.
+      legacy: "reject",
+      onerror: (error) => {
+        console.error("[mcp-proxy] modern handler error", error);
+      },
+    },
+  );
+
+  const nodeHandler = toNodeHandler({
+    fetch: (request, options) => handler.fetch(request, options),
+  });
+
+  return {
+    close: () => handler.close(),
+    createInstance,
+    handle: async (instance, req, res, body) => {
+      try {
+        await requestContext.run(instance, () => nodeHandler(req, res, body));
+      } finally {
+        // Resolves only once the response - including a streamed one - is
+        // fully written, so this is the end of the exchange, not the middle.
+        try {
+          await instance.server.close();
+        } catch (error) {
+          console.error("[mcp-proxy] error closing modern instance", error);
+        }
+
+        instance.teardown();
+      }
+    },
+    notify: handler.notify,
+  };
+};
+
 const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
   authenticate,
@@ -318,6 +854,9 @@ const handleStreamRequest = async <T extends ServerLike>({
   enableJsonResponse,
   endpoint,
   eventStore,
+  eventStoreMaxEvents,
+  maxBodySize,
+  modernHandler,
   oauth,
   onClose,
   onConnect,
@@ -327,14 +866,17 @@ const handleStreamRequest = async <T extends ServerLike>({
 }: {
   activeTransports: Record<
     string,
-    { server: T; transport: StreamableHTTPServerTransport }
+    { server: T; transport: NodeStreamableHTTPServerTransport }
   >;
   authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
   authMiddleware: AuthenticationMiddleware;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
   endpoint: string;
-  eventStore?: EventStore;
+  eventStore?: EventStoreOption;
+  eventStoreMaxEvents?: number;
+  maxBodySize?: MaxBodySizeOption;
+  modernHandler?: ModernLeg<T>;
   oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
@@ -351,15 +893,23 @@ const handleStreamRequest = async <T extends ServerLike>({
       // In stateless mode, ignore session ID header entirely (like Python MCP SDK)
       const sessionId = stateless
         ? undefined
-        : (Array.isArray(req.headers["mcp-session-id"])
-            ? req.headers["mcp-session-id"][0]
-            : req.headers["mcp-session-id"]);
+        : Array.isArray(req.headers["mcp-session-id"])
+          ? req.headers["mcp-session-id"][0]
+          : req.headers["mcp-session-id"];
 
-      let transport: StreamableHTTPServerTransport;
+      let transport: NodeStreamableHTTPServerTransport;
 
       let server: T;
 
-      body = await getBody(req);
+      const bodyResult = await getBody(req, maxBodySize);
+
+      if (bodyResult.tooLarge) {
+        sendPayloadTooLarge({ maxBodySize: bodyResult.limit, req, res });
+
+        return true;
+      }
+
+      body = bodyResult.body;
 
       // Per-request authentication for all requests
       // Store authResult to update existing sessions with fresh auth context
@@ -444,9 +994,57 @@ const handleStreamRequest = async <T extends ServerLike>({
         }
       }
 
+      // Era classification, once, at the entry boundary. `isLegacyRequest` is
+      // the SDK's own routing predicate rather than a re-implementation, so
+      // this branch cannot disagree with what the modern handler would do.
+      // Non-POST verbs never reach here; they have no envelope and belong to
+      // the 2025-era session machinery below either way.
+      //
+      // `isLegacyRequest` is false for anything it cannot positively call
+      // legacy, which includes a body that is not a JSON-RPC message at all.
+      // Those are not 2026-07-28 traffic and must keep the answer they have
+      // always had, so only well-formed messages are offered to the modern
+      // leg - a valid message carrying a malformed envelope still goes there,
+      // which is where the spec says it should be diagnosed.
+      // An empty batch is neither era's traffic; excluding it here keeps the
+      // answer a 2025 client already gets rather than handing it to a leg that
+      // classifies it as a rejection.
+      if (modernHandler && isJsonRpcBody(body) && !isEmptyBatch(body)) {
+        // The parsed body is passed to both calls: `toWebRequest` would
+        // otherwise re-serialize it and `isLegacyRequest` would clone, read and
+        // re-parse it, on every request of either era.
+        const webRequest = await toWebRequest(req, body);
+
+        if (!(await isLegacyRequest(webRequest, body))) {
+          let instance;
+
+          try {
+            instance = await modernHandler.createInstance({
+              authResult,
+              body,
+              req,
+            });
+          } catch (error) {
+            await handleCreateServerError({ body, error, oauth, res });
+
+            return true;
+          }
+
+          await modernHandler.handle(instance, req, res, body);
+
+          return true;
+        }
+      }
+
       if (sessionId) {
         const activeTransport = activeTransports[sessionId];
         if (!activeTransport) {
+          if (authenticate && isJsonRpcBody(body)) {
+            sendSessionUnauthorizedResponse({ body, oauth, res });
+
+            return true;
+          }
+
           res.setHeader("Content-Type", "application/json");
           res
             .writeHead(404)
@@ -472,9 +1070,9 @@ const handleStreamRequest = async <T extends ServerLike>({
         }
       } else if (!sessionId && isInitializeRequest(body)) {
         // Create a new transport for the session
-        transport = new StreamableHTTPServerTransport({
+        transport = new NodeStreamableHTTPServerTransport({
           enableJsonResponse,
-          eventStore: eventStore || new InMemoryEventStore(),
+          eventStore: resolveEventStore(eventStore, eventStoreMaxEvents),
           onsessioninitialized: (_sessionId) => {
             // add only when the id Session id is generated (skip in stateless mode)
             if (!stateless && _sessionId) {
@@ -511,46 +1109,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         try {
           server = await createServer(req);
         } catch (error) {
-          // Check if error is a Response object with headers already set
-          if (await handleResponseError(error, res)) {
-            return true;
-          }
-
-          // Detect authentication errors and return HTTP 401
-          const errorMessage =
-            error instanceof Error ? error.message : String(error);
-          const isAuthError =
-            errorMessage.includes("Authentication") ||
-            errorMessage.includes("Invalid JWT") ||
-            errorMessage.includes("Token") ||
-            errorMessage.includes("Unauthorized");
-
-          if (isAuthError) {
-            res.setHeader("Content-Type", "application/json");
-
-            // Add WWW-Authenticate header if OAuth config is available
-            const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
-              error: "invalid_token",
-              error_description: errorMessage,
-            });
-            if (wwwAuthHeader) {
-              res.setHeader("WWW-Authenticate", wwwAuthHeader);
-            }
-
-            res.writeHead(401).end(
-              JSON.stringify({
-                error: {
-                  code: -32000,
-                  message: errorMessage,
-                },
-                id: (body as { id?: unknown })?.id ?? null,
-                jsonrpc: "2.0",
-              }),
-            );
-            return true;
-          }
-
-          res.writeHead(500).end("Error creating server");
+          await handleCreateServerError({ body, error, oauth, res });
 
           return true;
         }
@@ -566,9 +1125,9 @@ const handleStreamRequest = async <T extends ServerLike>({
         return true;
       } else if (stateless && !sessionId && !isInitializeRequest(body)) {
         // In stateless mode, handle non-initialize requests by creating a new transport
-        transport = new StreamableHTTPServerTransport({
+        transport = new NodeStreamableHTTPServerTransport({
           enableJsonResponse,
-          eventStore: eventStore || new InMemoryEventStore(),
+          eventStore: resolveEventStore(eventStore, eventStoreMaxEvents),
           onsessioninitialized: () => {
             // No session tracking in stateless mode
           },
@@ -578,46 +1137,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         try {
           server = await createServer(req);
         } catch (error) {
-          // Check if error is a Response object with headers already set
-          if (await handleResponseError(error, res)) {
-            return true;
-          }
-
-          // Detect authentication errors and return HTTP 401
-          const errorMessage =
-            error instanceof Error ? error.message : String(error);
-          const isAuthError =
-            errorMessage.includes("Authentication") ||
-            errorMessage.includes("Invalid JWT") ||
-            errorMessage.includes("Token") ||
-            errorMessage.includes("Unauthorized");
-
-          if (isAuthError) {
-            res.setHeader("Content-Type", "application/json");
-
-            // Add WWW-Authenticate header if OAuth config is available
-            const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
-              error: "invalid_token",
-              error_description: errorMessage,
-            });
-            if (wwwAuthHeader) {
-              res.setHeader("WWW-Authenticate", wwwAuthHeader);
-            }
-
-            res.writeHead(401).end(
-              JSON.stringify({
-                error: {
-                  code: -32000,
-                  message: errorMessage,
-                },
-                id: (body as { id?: unknown })?.id ?? null,
-                jsonrpc: "2.0",
-              }),
-            );
-            return true;
-          }
-
-          res.writeHead(500).end("Error creating server");
+          await handleCreateServerError({ body, error, oauth, res });
 
           return true;
         }
@@ -632,6 +1152,12 @@ const handleStreamRequest = async <T extends ServerLike>({
 
         return true;
       } else {
+        if (authenticate && isJsonRpcBody(body)) {
+          sendSessionUnauthorizedResponse({ body, oauth, res });
+
+          return true;
+        }
+
         // Error if the server is not created but the request is not an initialize request
         res.setHeader("Content-Type", "application/json");
 
@@ -684,17 +1210,36 @@ const handleStreamRequest = async <T extends ServerLike>({
     const activeTransport:
       | {
           server: T;
-          transport: StreamableHTTPServerTransport;
+          transport: NodeStreamableHTTPServerTransport;
         }
       | undefined = sessionId ? activeTransports[sessionId] : undefined;
 
     if (!sessionId) {
+      // Return METHOD_NOT_ALLOWED so stateless clients' transport stops reconnecting
+      if (stateless) {
+        res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
+
+        return true;
+      }
+
+      if (authenticate) {
+        sendSessionUnauthorizedResponse({ oauth, res });
+
+        return true;
+      }
+
       res.writeHead(400).end("No sessionId");
 
       return true;
     }
 
     if (!activeTransport) {
+      if (authenticate) {
+        sendSessionUnauthorizedResponse({ oauth, res });
+
+        return true;
+      }
+
       res.writeHead(400).end("No active transport");
 
       return true;
@@ -726,6 +1271,12 @@ const handleStreamRequest = async <T extends ServerLike>({
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
     if (!sessionId) {
+      if (authenticate) {
+        sendSessionUnauthorizedResponse({ oauth, res });
+
+        return true;
+      }
+
       res.writeHead(400).end("Invalid or missing sessionId");
 
       return true;
@@ -736,6 +1287,12 @@ const handleStreamRequest = async <T extends ServerLike>({
     const activeTransport = activeTransports[sessionId];
 
     if (!activeTransport) {
+      if (authenticate) {
+        sendSessionUnauthorizedResponse({ oauth, res });
+
+        return true;
+      }
+
       res.writeHead(400).end("No active transport");
       return true;
     }
@@ -831,7 +1388,9 @@ const handleSSERequest = async <T extends ServerLike>({
       if (!closed) {
         console.error("[mcp-proxy] error connecting to server", error);
 
-        res.writeHead(500).end("Error connecting to server");
+        if (!res.headersSent) {
+          res.writeHead(500).end("Error connecting to server");
+        }
       }
     }
 
@@ -858,6 +1417,11 @@ const handleSSERequest = async <T extends ServerLike>({
       return true;
     }
 
+    // `maxBodySize` deliberately does not reach here: the SDK reads and parses
+    // this body itself, so the proxy never buffers it and has nothing to cap.
+    // The SSE endpoint is therefore bounded by whatever limit the SDK applies,
+    // not by the stream endpoint's. Front this with a gateway limit if you need
+    // the two to match.
     await activeTransport.handlePostMessage(req, res);
 
     return true;
@@ -873,10 +1437,15 @@ export const startHTTPServer = async <T extends ServerLike>({
   createServer,
   enableJsonResponse,
   eventStore,
+  eventStoreMaxEvents,
   host = "::",
+  keepAliveTimeout = DEFAULT_KEEP_ALIVE_TIMEOUT,
+  maxBodySize,
+  modern = true,
   oauth,
   onClose,
   onConnect,
+  onListenSubscriptions,
   onUnhandledRequest,
   port,
   sseEndpoint = "/sse",
@@ -891,11 +1460,68 @@ export const startHTTPServer = async <T extends ServerLike>({
   cors?: boolean | CorsOptions;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
-  eventStore?: EventStore;
+  /**
+   * Event store for the streamable HTTP transport's resumability support.
+   * Pass `false` to disable resumability entirely (recommended for
+   * request/response-only deployments that don't need replay-on-reconnect).
+   * Omit to get a fresh, bounded `InMemoryEventStore` per session - see
+   * `eventStoreMaxEvents`. Pass an `EventStore` instance to bring your own
+   * (e.g. a persistent, cross-process store); it will be shared across all
+   * sessions handled by this server.
+   */
+  eventStore?: EventStoreOption;
+  /**
+   * Caps how many events the auto-created per-session `InMemoryEventStore`
+   * retains (oldest evicted first) before it's overridden by an explicit
+   * `eventStore`. Bounds memory for long-lived sessions. Default: 1000.
+   */
+  eventStoreMaxEvents?: number;
   host?: string;
+  keepAliveTimeout?: number;
+  /**
+   * Caps how many bytes of a request body the stream endpoint buffers,
+   * bounding the memory a single request can consume. A request over the cap
+   * is answered with `413 Payload Too Large` and the connection is closed.
+   * Default: 10485760 (10 MiB). Pass `false` to disable the cap entirely
+   * (unbounded buffering - only safe behind a gateway that already limits body
+   * size). Does not apply to the SSE endpoint, whose POST bodies are read by
+   * the MCP SDK.
+   */
+  maxBodySize?: MaxBodySizeOption;
+  /**
+   * Serve protocol revision 2026-07-28 alongside the 2025-era revisions on
+   * `streamEndpoint`. Each POST is classified by whether it carries the
+   * revision's per-request `_meta` envelope, so both eras share one URL and
+   * neither client needs to know the other exists.
+   *
+   * Pass `false` to serve only 2025-era clients; 2026-07-28 traffic then falls
+   * through to the session machinery, which does not recognise it. The leg
+   * lives on `streamEndpoint`, so it is also absent when that is `null`.
+   * Default: `true`.
+   */
+  modern?: boolean;
   oauth?: AuthConfig["oauth"];
+  /**
+   * Called when a server instance is torn down.
+   *
+   * The unit of "a server" differs by protocol era: a 2025-era connection holds
+   * one instance for the life of its session, while 2026-07-28 builds a fresh
+   * one per request - so on that leg this fires once per request. Keep it cheap
+   * and idempotent.
+   */
   onClose?: (server: T) => Promise<void>;
+  /**
+   * Called when a server instance is created. Fires once per session on the
+   * 2025-era legs and once per request on the 2026-07-28 leg - see `onClose`.
+   */
   onConnect?: (server: T) => Promise<void>;
+  /**
+   * Acts on the `resourceSubscriptions` of an incoming 2026-07-28
+   * `subscriptions/listen`. A proxy uses this to subscribe upstream; without it
+   * the filter is honored locally and the client is never told anything
+   * changed. See {@link ListenSubscriptionsHandler}.
+   */
+  onListenSubscriptions?: ListenSubscriptionsHandler;
   onUnhandledRequest?: (
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -914,11 +1540,23 @@ export const startHTTPServer = async <T extends ServerLike>({
     string,
     {
       server: T;
-      transport: StreamableHTTPServerTransport;
+      transport: NodeStreamableHTTPServerTransport;
     }
   > = {};
 
   const authMiddleware = new AuthenticationMiddleware({ apiKey, oauth });
+
+  // Only built when the stream endpoint exists: 2026-07-28 has no SSE-transport
+  // counterpart, so an SSE-only deployment has nowhere to serve it.
+  const modernHandler =
+    modern && streamEndpoint
+      ? createModernLeg({
+          createServer,
+          onClose,
+          onConnect,
+          onListenSubscriptions,
+        })
+      : undefined;
 
   /**
    * @author https://dev.classmethod.jp/articles/mcp-sse/
@@ -944,7 +1582,15 @@ export const startHTTPServer = async <T extends ServerLike>({
     // and would otherwise short-circuit the MCP protocol handlers.
     // Use a fixed base because `host` may be "::" (IPv6 any), which is not a
     // valid URL authority. We only need pathname here.
-    const requestUrl = new URL(req.url || "", "http://localhost");
+    // A malformed request target (e.g. "//") makes `new URL` throw, which
+    // would crash the process from this listener, so reject it with 400.
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(req.url || "", "http://localhost");
+    } catch {
+      res.writeHead(400).end("Bad Request");
+      return;
+    }
     const isMcpEndpoint =
       (sseEndpoint && requestUrl.pathname === sseEndpoint) ||
       (streamEndpoint && requestUrl.pathname === streamEndpoint);
@@ -991,6 +1637,9 @@ export const startHTTPServer = async <T extends ServerLike>({
         enableJsonResponse,
         endpoint: streamEndpoint,
         eventStore,
+        eventStoreMaxEvents,
+        maxBodySize,
+        modernHandler,
         oauth,
         onClose,
         onConnect,
@@ -1005,7 +1654,7 @@ export const startHTTPServer = async <T extends ServerLike>({
     res.writeHead(404).end();
   };
 
-  let httpServer;
+  let httpServer: http.Server | https.Server;
   if (sslCa || sslCert || sslKey) {
     const options: https.ServerOptions = {};
     if (sslCa) {
@@ -1040,6 +1689,14 @@ export const startHTTPServer = async <T extends ServerLike>({
     httpServer = http.createServer(requestListener);
   }
 
+  // Keep stateful stream sessions from being torn down when Node closes
+  // otherwise-idle HTTP keep-alive sockets after its 5 second default.
+  httpServer.keepAliveTimeout = keepAliveTimeout;
+  httpServer.headersTimeout = Math.max(
+    httpServer.headersTimeout,
+    keepAliveTimeout + 1000,
+  );
+
   await new Promise((resolve) => {
     httpServer.listen(port, host, () => {
       resolve(undefined);
@@ -1056,8 +1713,24 @@ export const startHTTPServer = async <T extends ServerLike>({
         await transport.transport.close();
       }
 
+      await modernHandler?.close();
+
       return new Promise((resolve, reject) => {
+        // A socket that carried a closed `subscriptions/listen` stream stays
+        // counted as in-flight even though the exchange is over, and `close()`
+        // waits seconds for it - long enough to eat most of the CLI's
+        // graceful-shutdown budget. Anything genuinely still running gets this
+        // grace period first; only what outlives it is cut off. Unref'd so it
+        // never holds the process open by itself.
+        const forceTimer = setTimeout(() => {
+          httpServer.closeAllConnections();
+        }, FORCE_CLOSE_GRACE_PERIOD);
+
+        forceTimer.unref();
+
         httpServer.close((error) => {
+          clearTimeout(forceTimer);
+
           if (error) {
             reject(error);
 
@@ -1066,7 +1739,12 @@ export const startHTTPServer = async <T extends ServerLike>({
 
           resolve();
         });
+
+        // Keep-alive sockets with nothing on them would otherwise hold
+        // `close()` open; releasing them costs no in-flight work.
+        httpServer.closeIdleConnections();
       });
     },
+    notify: modernHandler?.notify ?? NO_MODERN_SUBSCRIBERS,
   };
 };

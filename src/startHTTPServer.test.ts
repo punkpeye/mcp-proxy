@@ -1,14 +1,15 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
+import { Client } from "@modelcontextprotocol/client";
+import { SSEClientTransport } from "@modelcontextprotocol/client";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { Server } from "@modelcontextprotocol/server";
+import { ServerCapabilities } from "@modelcontextprotocol/server";
 import { EventSource } from "eventsource";
 import fs from "fs";
 import { getRandomPort } from "get-port-please";
 import http from "http";
 import https from "https";
+import net from "net";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 
@@ -130,6 +131,73 @@ it("proxies messages between HTTP stream and stdio servers", async () => {
 
   expect(onClose).toHaveBeenCalled();
 });
+
+it(
+  "keeps stateful HTTP stream sessions alive after idle keep-alive timeout window",
+  async () => {
+    const port = await getRandomPort();
+    const onClose = vi.fn().mockResolvedValue(undefined);
+
+    const httpServer = await startHTTPServer({
+      createServer: async () => {
+        return new Server(
+          { name: "test", version: "1.0.0" },
+          { capabilities: {} },
+        );
+      },
+      onClose,
+      port,
+    });
+
+    const initializeResponse = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0.0" },
+          protocolVersion: "2025-03-26",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(initializeResponse.status).toBe(200);
+    const sessionId = initializeResponse.headers.get("mcp-session-id");
+    expect(sessionId).toBeTruthy();
+    await initializeResponse.text();
+
+    await delay(6_000);
+
+    const listToolsResponse = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 2,
+        jsonrpc: "2.0",
+        method: "tools/list",
+        params: {},
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "mcp-session-id": sessionId!,
+      },
+      method: "POST",
+    });
+    const listToolsBody = await listToolsResponse.text();
+
+    expect(listToolsResponse.status).not.toBe(404);
+    expect(listToolsBody).not.toContain("Session not found");
+    expect(onClose).not.toHaveBeenCalled();
+
+    await httpServer.close();
+  },
+  15_000,
+);
 
 it("proxies messages between SSE and stdio servers", async () => {
   const stdioTransport = new StdioClientTransport({
@@ -667,6 +735,36 @@ it("does not require auth for /ping endpoint", async () => {
   await httpServer.close();
 });
 
+it("responds with 400 to a malformed request target instead of crashing", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server({ name: "test", version: "1.0.0" }, { capabilities: {} });
+    },
+    port,
+  });
+
+  // `//` is not a valid URL target; sent via http.request so it isn't
+  // normalized away. Before the fix this threw inside the request listener
+  // and crashed the process.
+  const statusCode = await new Promise<number>((resolve, reject) => {
+    const request = http.request(
+      { host: "localhost", path: "//", port },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
+
+  expect(statusCode).toBe(400);
+
+  await httpServer.close();
+});
+
 it("does not require auth for OPTIONS requests", async () => {
   const port = await getRandomPort();
   const apiKey = "test-api-key-999";
@@ -894,6 +992,136 @@ it("accepts requests with valid Bearer token in stateless mode", async () => {
   await streamClient.close();
   await httpServer.close();
   await stdioClient.close();
+});
+
+it("returns 401 for authenticated stream requests without a session ID", async () => {
+  const port = await getRandomPort();
+  const authenticate = vi.fn().mockResolvedValue({ userId: "test-user" });
+  const createServer = vi.fn(async () => {
+    return new Server({ name: "test", version: "1.0.0" }, { capabilities: {} });
+  });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer,
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/list",
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: "Bearer valid-token",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+
+    const errorResponse = (await response.json()) as {
+      error: { code: number; message: string };
+      id: null | number;
+      jsonrpc: string;
+    };
+    expect(errorResponse.error).toEqual({
+      code: -32000,
+      message: "Unauthorized: No valid session ID provided",
+    });
+    expect(errorResponse.id).toBe(1);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    expect(createServer).not.toHaveBeenCalled();
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("returns 401 for authenticated stream GET requests without a session ID", async () => {
+  const port = await getRandomPort();
+  const authenticate = vi.fn().mockResolvedValue({ userId: "test-user" });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: "Bearer valid-token",
+      },
+      method: "GET",
+    });
+
+    expect(response.status).toBe(401);
+
+    const errorResponse = (await response.json()) as {
+      error: { code: number; message: string };
+      id: null | number;
+      jsonrpc: string;
+    };
+    expect(errorResponse.error.message).toBe(
+      "Unauthorized: No valid session ID provided",
+    );
+    expect(errorResponse.id).toBeNull();
+    expect(authenticate).not.toHaveBeenCalled();
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("keeps malformed authenticated stream requests as 400", async () => {
+  const port = await getRandomPort();
+  const authenticate = vi.fn().mockResolvedValue({ userId: "test-user" });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({ malformed: true }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: "Bearer valid-token",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+
+    const errorResponse = (await response.json()) as {
+      error: { code: number; message: string };
+      id: null | number;
+      jsonrpc: string;
+    };
+    expect(errorResponse.error.message).toBe(
+      "Bad Request: No valid session ID provided",
+    );
+    expect(authenticate).toHaveBeenCalledTimes(1);
+  } finally {
+    await httpServer.close();
+  }
 });
 
 it("returns 401 when authenticate callback returns null in stateless mode", async () => {
@@ -2128,7 +2356,7 @@ it("uses default CORS settings when cors: true", async () => {
   expect(response.status).toBe(204);
   expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
   expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
-    "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id",
+    "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Mcp-Method, Mcp-Name",
   );
   expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
 
@@ -2370,3 +2598,409 @@ it("DELETE request to non-existent session returns 400", async () => {
   await httpServer.close();
   await stdioClient.close();
 }, 15000);
+
+// The SDK only writes a resumability "priming event" (an `id: <eventId>`
+// SSE line) when an event store is configured, so its presence/absence is a
+// reliable, wire-level signal of whether resumability is actually active -
+// see https://github.com/punkpeye/mcp-proxy/issues/72.
+const initializeAndGetRawBody = async (port: number) => {
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        // Priming events are only sent to clients whose negotiated protocol
+        // version is >= 2025-11-25.
+        protocolVersion: "2025-11-25",
+      },
+    }),
+    headers: {
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(200);
+
+  return response.text();
+};
+
+it("disables the resumability event store when eventStore: false is passed", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    eventStore: false,
+    port,
+  });
+
+  try {
+    const body = await initializeAndGetRawBody(port);
+
+    expect(body).not.toMatch(/^id: /m);
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("enables a bounded, per-session resumability event store by default", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    const body = await initializeAndGetRawBody(port);
+
+    expect(body).toMatch(/^id: /m);
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("does not crash when the SSE connect error path runs after headers are sent", async () => {
+  // Regression test: the catch block of the SSE connect path called
+  // res.writeHead(500) without checking res.headersSent. When the failure
+  // happened after the SSE stream was established (headers already sent),
+  // writeHead threw ERR_HTTP_HEADERS_SENT, the request listener rejected,
+  // and the process died on the unhandled rejection.
+  const port = await getRandomPort();
+
+  const unhandledRejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    // server.connect() and the initial transport.send() succeed, so the
+    // SSE 200 headers are already on the wire when this throws.
+    onConnect: async () => {
+      throw new Error("simulated connect failure");
+    },
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/sse`);
+    expect(response.status).toBe(200);
+
+    // Wait until the error path has run, then give any rejection a tick.
+    await vi.waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith(
+        "[mcp-proxy] error connecting to server",
+        expect.any(Error),
+      );
+    });
+    await delay(100);
+
+    expect(unhandledRejections).toEqual([]);
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+    process.off("unhandledRejection", onUnhandledRejection);
+  }
+});
+
+it("handles a client aborting the stream request mid-body instead of hanging", async () => {
+  // Regression test: getBody() only settled on "end". A client that stops
+  // transmitting mid-body (here: FIN after a partial JSON payload with a
+  // larger declared Content-Length) left the promise pending forever, so the
+  // request handler never got past `await getBody(...)`.
+  //
+  // What is asserted is that the handler *resumes*, observed through the
+  // `authenticate` hook, which runs on the statement immediately after that
+  // await. Asserting on the "error reading body" log would pass for the wrong
+  // reason: the string only exists in the fixed code, so it fails without the
+  // fix whether or not the promise ever settles, and it would keep passing if
+  // a later refactor logged without settling.
+  const port = await getRandomPort();
+
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  let authenticateCalled = false;
+
+  const httpServer = await startHTTPServer({
+    authenticate: async () => {
+      authenticateCalled = true;
+
+      return { authenticated: true };
+    },
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  try {
+    await new Promise<void>((resolve) => {
+      const socket = net.connect(port, "localhost", () => {
+        socket.end(
+          "POST /mcp HTTP/1.1\r\n" +
+            `Host: localhost:${port}\r\n` +
+            "Content-Type: application/json\r\n" +
+            "Content-Length: 1000\r\n" +
+            "\r\n" +
+            '{"jsonrpc":"2.0",',
+        );
+      });
+      // Drain the response so the socket can close (an unread reply would
+      // otherwise keep "close" from firing). The server tears the
+      // connection down after the truncated body; either event means it is
+      // done with this connection.
+      socket.on("data", () => {});
+      socket.on("error", resolve);
+      socket.on("close", resolve);
+    });
+
+    // The aborted body must settle getBody() (as an invalid body) instead of
+    // leaving the request handler pending forever.
+    await vi.waitFor(
+      () => {
+        expect(authenticateCalled).toBe(true);
+      },
+      { timeout: 2_000 },
+    );
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+  }
+}, 3_000);
+
+/**
+ * Speaks HTTP over a raw socket and returns everything the server wrote back.
+ * The oversize paths destroy the connection, so `fetch` would surface them as
+ * an opaque network error rather than a status line.
+ */
+const collectRawResponse = (
+  port: number,
+  write: (socket: net.Socket) => void,
+) =>
+  new Promise<string>((resolve) => {
+    const received: Buffer[] = [];
+    const socket = net.connect(port, "localhost", () => write(socket));
+
+    socket.on("data", (chunk) => received.push(chunk));
+
+    const onDone = () => resolve(Buffer.concat(received).toString());
+
+    socket.on("close", onDone);
+    // ECONNRESET once the server tears the connection down is expected.
+    socket.on("error", onDone);
+  });
+
+it("answers 413 without reading the body when Content-Length exceeds the cap", async () => {
+  // The declared size is enough to reject on: no body is sent at all here, so
+  // a server that waited to count bytes would never answer.
+  const port = await getRandomPort();
+
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const maxBodySize = 4_096;
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    maxBodySize,
+    port,
+  });
+
+  try {
+    const response = await collectRawResponse(port, (socket) => {
+      socket.write(
+        "POST /mcp HTTP/1.1\r\n" +
+          `Host: localhost:${port}\r\n` +
+          "Content-Type: application/json\r\n" +
+          `Content-Length: ${maxBodySize * 4}\r\n` +
+          "\r\n",
+      );
+    });
+
+    expect(response).toContain("HTTP/1.1 413");
+    expect(response).toContain("Payload Too Large");
+
+    // The server survived and keeps serving other requests.
+    const pingResponse = await fetch(`http://localhost:${port}/ping`);
+    expect(pingResponse.status).toBe(200);
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+  }
+}, 10_000);
+
+it("answers 413 when a chunked body grows past the cap", async () => {
+  // A chunked body declares no size up front, so only the streaming byte
+  // count can catch it. getBody() previously accumulated every chunk with no
+  // bound, letting a dripping client grow the buffer indefinitely.
+  const port = await getRandomPort();
+
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const maxBodySize = 262_144; // 256 KiB, well under the 10 MiB default
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    maxBodySize,
+    port,
+  });
+
+  try {
+    const chunk = Buffer.alloc(65_536, "x");
+
+    const response = await collectRawResponse(port, (socket) => {
+      socket.write(
+        "POST /mcp HTTP/1.1\r\n" +
+          `Host: localhost:${port}\r\n` +
+          "Content-Type: application/json\r\n" +
+          "Transfer-Encoding: chunked\r\n" +
+          "\r\n",
+      );
+
+      // Drip chunks until the server cuts us off. Five times the cap is sent
+      // if it never does, which fails the assertion below.
+      let sent = 0;
+      const timer = setInterval(() => {
+        if (socket.destroyed || socket.writableEnded || sent >= 20) {
+          clearInterval(timer);
+
+          return;
+        }
+
+        sent += 1;
+        socket.write(`${chunk.length.toString(16)}\r\n`);
+        socket.write(chunk);
+        socket.write("\r\n");
+      }, 10);
+
+      socket.on("close", () => {
+        clearInterval(timer);
+      });
+    });
+
+    expect(response).toContain("HTTP/1.1 413");
+    expect(response).toContain("Payload Too Large");
+
+    // The server survived the flood and keeps serving other requests.
+    const pingResponse = await fetch(`http://localhost:${port}/ping`);
+    expect(pingResponse.status).toBe(200);
+  } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+  }
+}, 10_000);
+
+const buildLargeInitializeRequest = (padding: number) =>
+  JSON.stringify({
+    id: 1,
+    jsonrpc: "2.0",
+    method: "initialize",
+    params: {
+      capabilities: {},
+      clientInfo: { name: "x".repeat(padding), version: "1.0.0" },
+      protocolVersion: "2024-11-05",
+    },
+  });
+
+it("accepts a multi-megabyte request body under the default cap", async () => {
+  // The body cap must not reject payloads that MCP clients legitimately
+  // send - base64 images, documents and large pasted text routinely push a
+  // single tool call past a megabyte.
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+    stateless: true,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: buildLargeInitializeRequest(1_500_000), // ~1.5 MiB
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+  } finally {
+    await httpServer.close();
+  }
+}, 20_000);
+
+it("buffers a request body without limit when maxBodySize is false", async () => {
+  // `false` restores the pre-cap behaviour for deployments that bound body
+  // size at the gateway instead. The payload here is over the default cap,
+  // so it only succeeds because the cap is disabled.
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    maxBodySize: false,
+    port,
+    stateless: true,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: buildLargeInitializeRequest(11_534_336), // 11 MiB, over the 10 MiB default
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+  } finally {
+    await httpServer.close();
+  }
+}, 30_000);

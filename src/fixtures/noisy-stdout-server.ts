@@ -8,12 +8,8 @@
  * Related: https://github.com/punkpeye/mcp-proxy/issues/55
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 // Simulate non-JSON output on stdout before the server starts,
 // like Python import warnings or startup messages
@@ -34,7 +30,7 @@ const server = new Server(
   },
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+server.setRequestHandler("tools/list", async () => {
   // Simulate noise interleaved with normal responses
   const noiseDuring = process.env.NOISE_DURING;
   if (noiseDuring) {
@@ -55,7 +51,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-server.setRequestHandler(CallToolRequestSchema, async () => {
+server.setRequestHandler("tools/call", async () => {
   return {
     content: [
       {

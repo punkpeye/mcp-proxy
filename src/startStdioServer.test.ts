@@ -1,11 +1,8 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import {
-  CallToolResultSchema,
-  LoggingMessageNotificationSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { EventSource } from "eventsource";
-import { ChildProcess, fork } from "node:child_process";
+import { getRandomPort } from "get-port-please";
+import { ChildProcess, spawn } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ServerType } from "./startStdioServer.js";
@@ -15,25 +12,37 @@ if (!("EventSource" in global)) {
   global.EventSource = EventSource;
 }
 
+/**
+ * Each case boots two `tsx` children - the upstream HTTP fixture and the stdio
+ * proxy under test - so the wall clock is dominated by TypeScript
+ * transpilation, not the protocol exchange. Both the hook and the tests need
+ * more than vitest's defaults, which is what the explicit timeouts are for.
+ */
 describe("startStdioServer.test.ts", () => {
+  let port: number;
   let proc: ChildProcess;
 
+  // Spawning `tsx` pays TypeScript transpilation before the fixture listens,
+  // and vitest runs test files in parallel, so the default 10s hook timeout is
+  // not enough headroom under load.
   beforeEach(async () => {
-    const serverPath =
-      require.resolve("@modelcontextprotocol/sdk/examples/server/sseAndStreamableHttpCompatibleServer.js");
-    proc = fork(serverPath, [], {
+    port = await getRandomPort();
+    proc = spawn("tsx", ["src/fixtures/backwards-compatible-http-server.ts"], {
+      env: { ...process.env, PORT: String(port) },
       stdio: "pipe",
     });
     await new Promise((resolve) => {
       proc.stdout?.on("data", (data) => {
-        console.log(data.toString());
-        data
-          .toString()
-          .includes("Backwards compatible MCP server listening on port");
-        resolve(null);
+        if (
+          data
+            .toString()
+            .includes("Backwards compatible MCP server listening on port")
+        ) {
+          resolve(null);
+        }
       });
     });
-  });
+  }, 30000);
 
   afterEach(async () => {
     proc.kill();
@@ -45,7 +54,7 @@ describe("startStdioServer.test.ts", () => {
         "src/fixtures/simple-stdio-proxy-server.ts",
         JSON.stringify({
           serverType: ServerType.SSE,
-          url: "http://127.0.0.1:3000/sse",
+          url: `http://127.0.0.1:${port}/sse`,
         }),
       ],
       command: "tsx",
@@ -64,7 +73,7 @@ describe("startStdioServer.test.ts", () => {
     let notificationCount = 0;
 
     stdioClient.setNotificationHandler(
-      LoggingMessageNotificationSchema,
+      "notifications/message",
       (notification) => {
         console.log(
           `Notification: ${notification.params.level} - ${notification.params.data}`,
@@ -82,11 +91,7 @@ describe("startStdioServer.test.ts", () => {
         {
           description:
             "Starts sending periodic notifications for testing resumability",
-          execution: {
-            taskSupport: "forbidden",
-          },
           inputSchema: {
-            $schema: "http://json-schema.org/draft-07/schema#",
             properties: {
               count: {
                 default: 50,
@@ -106,25 +111,18 @@ describe("startStdioServer.test.ts", () => {
       ],
     });
 
-    const request = {
-      method: "tools/call",
-      params: {
-        arguments: {
-          count: 2, // Send 5 notifications
-          interval: 1000, // 1 second between notifications
-        },
-        name: "start-notification-stream",
+    const notificationResult = await stdioClient.callTool({
+      arguments: {
+        count: 2,
+        interval: 100,
       },
-    };
-    const notificationResult = await stdioClient.request(
-      request,
-      CallToolResultSchema,
-    );
+      name: "start-notification-stream",
+    });
 
     expect(notificationResult).toEqual({
       content: [
         {
-          text: "Started sending periodic notifications every 1000ms",
+          text: "Started sending periodic notifications every 100ms",
           type: "text",
         },
       ],
@@ -133,7 +131,7 @@ describe("startStdioServer.test.ts", () => {
     expect(notificationCount).toEqual(2);
 
     await stdioClient.close();
-  });
+  }, 30000);
 
   it("proxies messages between stdio and stream able servers", async () => {
     const stdioTransport = new StdioClientTransport({
@@ -141,7 +139,7 @@ describe("startStdioServer.test.ts", () => {
         "src/fixtures/simple-stdio-proxy-server.ts",
         JSON.stringify({
           serverType: ServerType.HTTPStream,
-          url: "http://127.0.0.1:3000/mcp",
+          url: `http://127.0.0.1:${port}/mcp`,
         }),
       ],
       command: "tsx",
@@ -160,7 +158,7 @@ describe("startStdioServer.test.ts", () => {
     let notificationCount = 0;
 
     stdioClient.setNotificationHandler(
-      LoggingMessageNotificationSchema,
+      "notifications/message",
       (notification) => {
         console.log(
           `Notification: ${notification.params.level} - ${notification.params.data}`,
@@ -178,11 +176,7 @@ describe("startStdioServer.test.ts", () => {
         {
           description:
             "Starts sending periodic notifications for testing resumability",
-          execution: {
-            taskSupport: "forbidden",
-          },
           inputSchema: {
-            $schema: "http://json-schema.org/draft-07/schema#",
             properties: {
               count: {
                 default: 50,
@@ -201,25 +195,18 @@ describe("startStdioServer.test.ts", () => {
         },
       ],
     });
-    const request = {
-      method: "tools/call",
-      params: {
-        arguments: {
-          count: 2, // Send 5 notifications
-          interval: 1000, // 1 second between notifications
-        },
-        name: "start-notification-stream",
+    const notificationResult = await stdioClient.callTool({
+      arguments: {
+        count: 2,
+        interval: 100,
       },
-    };
-    const notificationResult = await stdioClient.request(
-      request,
-      CallToolResultSchema,
-    );
+      name: "start-notification-stream",
+    });
 
     expect(notificationResult).toEqual({
       content: [
         {
-          text: "Started sending periodic notifications every 1000ms",
+          text: "Started sending periodic notifications every 100ms",
           type: "text",
         },
       ],
@@ -228,5 +215,5 @@ describe("startStdioServer.test.ts", () => {
     expect(notificationCount).toEqual(2);
 
     await stdioClient.close();
-  });
+  }, 30000);
 });

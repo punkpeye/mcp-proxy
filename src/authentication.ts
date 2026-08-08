@@ -1,5 +1,7 @@
 import type { IncomingMessage } from "http";
 
+import { timingSafeEqual } from "node:crypto";
+
 export interface AuthConfig {
   apiKey?: string;
   oauth?: {
@@ -148,6 +150,8 @@ export class AuthenticationMiddleware {
       return false;
     }
 
-    return apiKey === this.config.apiKey;
+    const expected = Buffer.from(this.config.apiKey);
+    const actual = Buffer.from(apiKey);
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
   }
 }

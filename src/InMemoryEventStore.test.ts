@@ -1,4 +1,4 @@
-import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import type { JSONRPCMessage } from "@modelcontextprotocol/server";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -236,5 +236,101 @@ describe("InMemoryEventStore", () => {
     } finally {
       secondSpy.mockRestore();
     }
+  });
+
+  it("evicts the oldest events once maxEvents is exceeded", async () => {
+    const store = new InMemoryEventStore({ maxEvents: 3 });
+    const streamId = "bounded-stream";
+
+    const eventIds: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      eventIds.push(
+        await store.storeEvent(streamId, {
+          id: i,
+          jsonrpc: "2.0",
+          method: `step/${i}`,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+
+    // Only the 3 most recently stored events survive.
+    expect(store.size).toBe(3);
+
+    // The two oldest events were evicted, so resuming from them is no
+    // longer possible - the caller falls back to a fresh stream.
+    for (const evictedId of eventIds.slice(0, 2)) {
+      const result = await store.replayEventsAfter(evictedId, {
+        send: vi.fn(),
+      });
+      expect(result).toBe("");
+    }
+
+    // Resuming from a surviving event still replays what came after it.
+    const replayed: JSONRPCMessage[] = [];
+    const returnedStreamId = await store.replayEventsAfter(eventIds[2], {
+      send: async (_eventId, message) => {
+        replayed.push(message);
+      },
+    });
+    expect(returnedStreamId).toBe(streamId);
+    expect(replayed).toHaveLength(2);
+  });
+
+  it("caps total retained events across all streams, not per stream", async () => {
+    const store = new InMemoryEventStore({ maxEvents: 4 });
+
+    for (let i = 0; i < 3; i++) {
+      await store.storeEvent("stream-a", {
+        id: i,
+        jsonrpc: "2.0",
+        method: `a/${i}`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    for (let i = 0; i < 3; i++) {
+      await store.storeEvent("stream-b", {
+        id: i,
+        jsonrpc: "2.0",
+        method: `b/${i}`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+
+    // 6 events were stored across two streams; the store-wide cap still holds.
+    expect(store.size).toBe(4);
+  });
+
+  it("defaults to a bounded size when maxEvents is not configured", async () => {
+    const store = new InMemoryEventStore();
+    const streamId = "default-cap-stream";
+
+    for (let i = 0; i < 1010; i++) {
+      await store.storeEvent(streamId, {
+        id: i,
+        jsonrpc: "2.0",
+        method: "tools/list",
+      });
+    }
+
+    expect(store.size).toBe(1000);
+  });
+
+  it("rejects a non-positive maxEvents", () => {
+    expect(() => new InMemoryEventStore({ maxEvents: 0 })).toThrow(
+      /maxEvents must be at least 1/,
+    );
+    expect(() => new InMemoryEventStore({ maxEvents: -1 })).toThrow(
+      /maxEvents must be at least 1/,
+    );
+  });
+
+  it("rejects a NaN maxEvents instead of silently disabling eviction", () => {
+    // A naive `maxEvents < 1` check lets NaN through (every comparison with
+    // NaN is false), which would make `size > maxEvents` never trigger and
+    // silently reintroduce unbounded growth.
+    expect(() => new InMemoryEventStore({ maxEvents: NaN })).toThrow(
+      /maxEvents must be at least 1/,
+    );
   });
 });

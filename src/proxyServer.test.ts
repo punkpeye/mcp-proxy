@@ -1,8 +1,8 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { McpError, ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { Server } from "@modelcontextprotocol/server";
+import { ProtocolError, ServerCapabilities } from "@modelcontextprotocol/server";
 import { EventSource } from "eventsource";
 import { getRandomPort } from "get-port-please";
 import { describe, expect, it } from "vitest";
@@ -123,7 +123,7 @@ describe("proxyServer timeout functionality", () => {
     });
 
     // This should throw a timeout error as delay (1s) > timeout (500ms)
-    await expect(streamClient.listResources()).rejects.toThrow(McpError);
+    await expect(streamClient.listResources()).rejects.toThrow(ProtocolError);
 
     await cleanup();
   }, 10000);

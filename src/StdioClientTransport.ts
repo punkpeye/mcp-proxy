@@ -3,11 +3,11 @@
  */
 
 import {
+  JSONRPCMessage,
   ReadBuffer,
   serializeMessage,
-} from "@modelcontextprotocol/sdk/shared/stdio.js";
-import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+  Transport,
+} from "@modelcontextprotocol/client";
 import { ChildProcess, IOType, spawn } from "node:child_process";
 import { PassThrough, Stream } from "node:stream";
 
