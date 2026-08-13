@@ -28,7 +28,7 @@ import { randomUUID } from "node:crypto";
 import { AuthConfig, AuthenticationMiddleware } from "./authentication.js";
 import { InMemoryEventStore } from "./InMemoryEventStore.js";
 
-const DEFAULT_KEEP_ALIVE_TIMEOUT = 300_000;
+const DEFAULT_KEEP_ALIVE_TIMEOUT = 60_000;
 
 /**
  * How long a 2025-era stream session with nothing attached to it is kept before
