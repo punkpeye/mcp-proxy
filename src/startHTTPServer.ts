@@ -31,6 +31,89 @@ import { InMemoryEventStore } from "./InMemoryEventStore.js";
 const DEFAULT_KEEP_ALIVE_TIMEOUT = 300_000;
 
 /**
+ * Adds an explicit UTF-8 charset to text-based MCP response media types.
+ *
+ * JSON and SSE default to UTF-8 in their respective specifications, but some
+ * HTTP clients (notably Python's urllib) decode an unqualified response as
+ * Latin-1. Normalising at the Node response boundary also covers responses
+ * produced by the MCP SDK transports, not only the error responses built in
+ * this module.
+ */
+const addUtf8Charset = (contentType: string): string => {
+  if (
+    /;\s*charset=/i.test(contentType) ||
+    !/^(application\/json|text\/event-stream)(?:\s*;|$)/i.test(contentType)
+  ) {
+    return contentType;
+  }
+
+  return `${contentType}; charset=utf-8`;
+};
+
+const normalizeResponseHeaders = (
+  headers: http.OutgoingHttpHeader[] | http.OutgoingHttpHeaders,
+): http.OutgoingHttpHeader[] | http.OutgoingHttpHeaders => {
+  if (Array.isArray(headers)) {
+    return headers.map((value, index) => {
+      const headerName = headers[index - 1];
+      if (
+        index % 2 === 1 &&
+        typeof headerName === "string" &&
+        headerName.toLowerCase() === "content-type" &&
+        typeof value === "string"
+      ) {
+        return addUtf8Charset(value);
+      }
+
+      return value;
+    });
+  }
+
+  const normalizedHeaders = { ...headers };
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === "content-type" && typeof value === "string") {
+      normalizedHeaders[name] = addUtf8Charset(value);
+    }
+  }
+
+  return normalizedHeaders;
+};
+
+/**
+ * Normalise Content-Type immediately before Node sends the headers. This is
+ * deliberately installed per response: the MCP SDK can call writeHead itself,
+ * bypassing the response construction paths in this package.
+ */
+const ensureUtf8ResponseCharset = (res: http.ServerResponse): void => {
+  const originalWriteHead = res.writeHead.bind(res) as (
+    statusCode: number,
+    statusMessage?: http.OutgoingHttpHeader[] | http.OutgoingHttpHeaders | string,
+    headers?: http.OutgoingHttpHeader[] | http.OutgoingHttpHeaders,
+  ) => http.ServerResponse;
+
+  res.writeHead = ((statusCode, statusMessageOrHeaders, headers) => {
+    const currentContentType = res.getHeader("Content-Type");
+    if (typeof currentContentType === "string") {
+      res.setHeader("Content-Type", addUtf8Charset(currentContentType));
+    }
+
+    const responseHeaders =
+      typeof statusMessageOrHeaders === "string" ? headers : statusMessageOrHeaders;
+    if (responseHeaders) {
+      const normalizedHeaders = normalizeResponseHeaders(responseHeaders);
+
+      if (typeof statusMessageOrHeaders === "string") {
+        return originalWriteHead(statusCode, statusMessageOrHeaders, normalizedHeaders);
+      }
+
+      return originalWriteHead(statusCode, normalizedHeaders);
+    }
+
+    return originalWriteHead(statusCode, statusMessageOrHeaders, headers);
+  }) as http.ServerResponse["writeHead"];
+};
+
+/**
  * How long a 2025-era stream session with nothing attached to it is kept before
  * the reaper closes it.
  *
@@ -1762,6 +1845,8 @@ export const startHTTPServer = async <T extends ServerLike>({
    * @author https://dev.classmethod.jp/articles/mcp-sse/
    */
   const requestListener: http.RequestListener = async (req, res) => {
+    ensureUtf8ResponseCharset(res);
+
     // Apply CORS headers
     applyCorsHeaders(req, res, cors);
 

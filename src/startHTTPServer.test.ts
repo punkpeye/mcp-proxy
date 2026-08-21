@@ -168,6 +168,9 @@ it(
     });
 
     expect(initializeResponse.status).toBe(200);
+    expect(initializeResponse.headers.get("content-type")).toBe(
+      "text/event-stream; charset=utf-8",
+    );
     const sessionId = initializeResponse.headers.get("mcp-session-id");
     expect(sessionId).toBeTruthy();
     await initializeResponse.text();
@@ -198,6 +201,30 @@ it(
   },
   15_000,
 );
+
+it("declares UTF-8 on JSON error responses", async () => {
+  const port = await getRandomPort();
+  const httpServer = await startHTTPServer({
+    apiKey: "test-api-key",
+    createServer: async () =>
+      new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      ),
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`);
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("content-type")).toBe(
+      "application/json; charset=utf-8",
+    );
+  } finally {
+    await httpServer.close();
+  }
+});
 
 it("proxies messages between SSE and stdio servers", async () => {
   const stdioTransport = new StdioClientTransport({
