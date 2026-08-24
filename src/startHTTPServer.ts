@@ -1444,7 +1444,23 @@ const handleStreamRequest = async <T extends ServerLike>({
 
     trackSessionStream(activeTransport, res);
 
-    await activeTransport.transport.handleRequest(req, res);
+    try {
+      await activeTransport.transport.handleRequest(req, res);
+    } catch (error) {
+      // The standalone GET stream flushes SSE headers before it starts
+      // replaying events (e.g. for a reconnecting client's Last-Event-ID), so a
+      // mid-stream failure cannot be reported with a fresh status. The request
+      // listener handed to createServer is async and never awaited, so a throw
+      // here would reject as an unhandled rejection and leave the response
+      // hanging. Settle it instead, mirroring the POST and DELETE catch guards.
+      console.error("[mcp-proxy] error handling stream request", error);
+
+      if (res.headersSent) {
+        res.end();
+      } else {
+        res.writeHead(500).end("Error handling request");
+      }
+    }
 
     return true;
   }
