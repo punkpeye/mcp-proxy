@@ -448,10 +448,14 @@ const handleResponseError = async (
   if (isResponseLike || error instanceof Response) {
     const responseError = error as Response;
 
-    // If the response is already committed we cannot rewrite its status/headers;
-    // report unhandled so the caller can decide, rather than throwing here.
+    // Once the response is committed its status and headers are already on the
+    // wire, so ending it is the only thing left to do. Reporting this back as
+    // unhandled would send the caller into its own writeHead, which throws
+    // ERR_HTTP_HEADERS_SENT - the very crash this guard exists to prevent.
     if (res.headersSent) {
-      return false;
+      res.end();
+
+      return true;
     }
 
     // Convert Headers to http.OutgoingHttpHeaders format
