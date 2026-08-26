@@ -6,7 +6,7 @@ A TypeScript streamable HTTP and SSE proxy for [MCP](https://modelcontextprotoco
 > CORS is enabled by default with configurable options. See [CORS Configuration](#cors-configuration) for details.
 
 > [!NOTE]
-> For a Python implementation, see [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy).
+> For the inverse — giving a stdio-only client access to a remote MCP server, including the interactive OAuth flow — see [mcp-remote](https://github.com/punkpeye/mcp-remote).
 
 > [!NOTE]
 > MCP Proxy is what [FastMCP](https://github.com/punkpeye/fastmcp) uses to enable streamable HTTP and SSE.
