@@ -150,7 +150,7 @@ type BodyResult =
   | { readonly body: unknown; readonly tooLarge?: never }
   | { readonly limit: number; readonly tooLarge: true };
 
-const getBody = (
+export const getBody = (
   request: http.IncomingMessage,
   maxBodySize: MaxBodySizeOption = DEFAULT_MAX_BODY_SIZE,
 ) => {
@@ -176,6 +176,12 @@ const getBody = (
         if (maxBodySize !== false) {
           size += chunk.length;
           if (size > maxBodySize) {
+            // Stop reading immediately so the socket applies TCP backpressure
+            // instead of this process buffering an unbounded oversize body.
+            // Without this the stream stays in flowing mode and keeps
+            // emitting "data" after the promise settles, racing the 413
+            // teardown in sendPayloadTooLarge.
+            request.pause();
             resolve({ limit: maxBodySize, tooLarge: true });
             return;
           }

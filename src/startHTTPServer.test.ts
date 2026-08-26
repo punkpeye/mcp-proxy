@@ -10,11 +10,12 @@ import { getRandomPort } from "get-port-please";
 import http from "http";
 import https from "https";
 import net from "net";
+import { PassThrough } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 
 import { proxyServer } from "./proxyServer.js";
-import { startHTTPServer } from "./startHTTPServer.js";
+import { getBody, startHTTPServer } from "./startHTTPServer.js";
 
 if (!("EventSource" in global)) {
   // @ts-expect-error - figure out how to use --experimental-eventsource with vitest
@@ -3686,3 +3687,48 @@ it("finishes reaping a session whose onClose rejects", async () => {
     process.off("unhandledRejection", onUnhandledRejection);
   }
 }, 15_000);
+
+it("pauses the request stream when a chunked body overflows the cap, instead of ingesting more", async () => {
+  // Regression test for the getBody() streaming overflow branch. When the
+  // running byte count crossed maxBodySize the promise resolved with
+  // { tooLarge: true } but the stream was left in flowing mode. It kept
+  // emitting "data" after the caller had already decided to answer 413,
+  // buffering an unbounded oversize body and racing sendPayloadTooLarge()'s
+  // teardown. Pausing the stream in that branch applies TCP backpressure and
+  // stops further ingestion.
+  //
+  // A PassThrough stands in for the http.IncomingMessage: getBody only uses
+  // the readable side and request.headers, and a raw socket cannot make the
+  // "keeps flowing after resolve" race observable as deterministically.
+  const maxBodySize = 256;
+
+  const request = new PassThrough() as unknown as http.IncomingMessage;
+  (request as unknown as { headers: http.IncomingHttpHeaders }).headers = {};
+
+  const resultPromise = getBody(request, maxBodySize);
+
+  // First writes already exceed the cap, split across chunks so only the
+  // streaming counter (not a declared Content-Length) can catch it.
+  (request as unknown as PassThrough).write(Buffer.alloc(200, "a"));
+  (request as unknown as PassThrough).write(Buffer.alloc(200, "b"));
+
+  const result = await resultPromise;
+
+  expect(result).toEqual({ limit: maxBodySize, tooLarge: true });
+
+  // The overflow branch must have paused the stream so the socket backs off.
+  expect((request as unknown as PassThrough).isPaused()).toBe(true);
+
+  // Prove no more bytes are ingested after the decision: a probe attached now
+  // must stay silent. Without the pause the stream is still flowing and this
+  // listener fires on the next write, which is the exact race being fixed.
+  let dataAfterResolve = 0;
+  (request as unknown as PassThrough).on("data", () => {
+    dataAfterResolve += 1;
+  });
+  (request as unknown as PassThrough).write(Buffer.alloc(200, "c"));
+
+  await delay(30);
+
+  expect(dataAfterResolve).toBe(0);
+});
