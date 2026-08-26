@@ -454,6 +454,16 @@ const handleResponseError = async (
   if (isResponseLike || error instanceof Response) {
     const responseError = error as Response;
 
+    // Once the response is committed its status and headers are already on the
+    // wire, so ending it is the only thing left to do. Reporting this back as
+    // unhandled would send the caller into its own writeHead, which throws
+    // ERR_HTTP_HEADERS_SENT - the very crash this guard exists to prevent.
+    if (res.headersSent) {
+      res.end();
+
+      return true;
+    }
+
     // Convert Headers to http.OutgoingHttpHeaders format
     const fixedHeaders: http.OutgoingHttpHeaders = {};
     responseError.headers.forEach((value, key) => {
@@ -1372,6 +1382,16 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       return true;
     } catch (error) {
+      // The streaming transport may have already flushed response headers before
+      // throwing (e.g. mid-stream). Writing status/headers again would throw
+      // ERR_HTTP_HEADERS_SENT and crash the request, so bail out once committed —
+      // mirroring the DELETE and SSE catch guards below.
+      if (res.headersSent) {
+        console.error("[mcp-proxy] error handling request after headers sent", error);
+        res.end();
+        return true;
+      }
+
       // Check for scope challenge errors
       if (isScopeChallengeError(error)) {
         const response = authMiddleware.getScopeChallengeResponse(
