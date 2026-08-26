@@ -169,6 +169,9 @@ it(
     });
 
     expect(initializeResponse.status).toBe(200);
+    expect(initializeResponse.headers.get("content-type")).toBe(
+      "text/event-stream; charset=utf-8",
+    );
     const sessionId = initializeResponse.headers.get("mcp-session-id");
     expect(sessionId).toBeTruthy();
     await initializeResponse.text();
@@ -199,6 +202,110 @@ it(
   },
   15_000,
 );
+
+it("declares UTF-8 on JSON error responses", async () => {
+  const port = await getRandomPort();
+  const httpServer = await startHTTPServer({
+    apiKey: "test-api-key",
+    createServer: async () =>
+      new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      ),
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`);
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("content-type")).toBe(
+      "application/json; charset=utf-8",
+    );
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("declares UTF-8 on JSON-mode responses written by the SDK transport", async () => {
+  // `enableJsonResponse` answers with a plain JSON body instead of an SSE
+  // frame, and that body is written by the SDK transport rather than by this
+  // module. It is the path a Latin-1-defaulting client renders as mojibake, so
+  // it only stays covered as long as the normalisation sits at the writeHead
+  // boundary.
+  const port = await getRandomPort();
+  const httpServer = await startHTTPServer({
+    createServer: async () =>
+      new Server({ name: "test", version: "1.0.0" }, { capabilities: {} }),
+    enableJsonResponse: true,
+    port,
+    stateless: true,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0.0" },
+          protocolVersion: "2025-03-26",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "application/json; charset=utf-8",
+    );
+    await response.text();
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("leaves content types other than JSON and SSE alone", async () => {
+  // The charset is only appended for the two media types MCP speaks. A
+  // lookalike must not match on prefix, and a charset the caller chose
+  // deliberately must never be rewritten.
+  const port = await getRandomPort();
+  const httpServer = await startHTTPServer({
+    createServer: async () =>
+      new Server({ name: "test", version: "1.0.0" }, { capabilities: {} }),
+    onUnhandledRequest: async (req, res) => {
+      res.writeHead(200, {
+        "Content-Type": req.headers["x-echo-content-type"] as string,
+      });
+      res.end("body");
+    },
+    port,
+  });
+
+  try {
+    for (const contentType of [
+      "text/plain",
+      "application/json-seq",
+      "application/problem+json",
+      "application/json; charset=iso-8859-1",
+    ]) {
+      const response = await fetch(`http://localhost:${port}/other`, {
+        headers: { "x-echo-content-type": contentType },
+      });
+
+      expect(response.headers.get("content-type")).toBe(contentType);
+      await response.text();
+    }
+  } finally {
+    await httpServer.close();
+  }
+});
 
 it("proxies messages between SSE and stdio servers", async () => {
   const stdioTransport = new StdioClientTransport({
