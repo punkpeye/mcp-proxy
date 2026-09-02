@@ -136,6 +136,7 @@ class ProxyManager:
                 soup = BeautifulSoup(response.content, 'html.parser')
                 
                 # Try to parse table-based proxy lists
+                found = False
                 for row in soup.select('table tr'):
                     cols = row.find_all('td')
                     if len(cols) >= 2:
@@ -151,8 +152,31 @@ class ProxyManager:
                                 proxy = Proxy(ip=ip, port=port)
                                 with self.lock:
                                     self.proxies.append(proxy)
+                                found = True
                         except (ValueError, OSError):
                             continue
+
+                # Fallback: some endpoints return plain text lists like "ip:port" per line
+                # Parse lines in the response body to extract ip:port pairs
+                text = response.text or ''
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line or ':' not in line:
+                        continue
+                    parts = line.split(':')
+                    if len(parts) < 2:
+                        continue
+                    ip_candidate = parts[0].strip()
+                    port_candidate = parts[1].strip()
+                    try:
+                        port = int(port_candidate)
+                        socket.inet_aton(ip_candidate)
+                        if not any(p.ip == ip_candidate and p.port == port for p in self.proxies):
+                            proxy = Proxy(ip=ip_candidate, port=port)
+                            with self.lock:
+                                self.proxies.append(proxy)
+                    except (ValueError, OSError):
+                        continue
                 
                 logger.info(f"Successfully fetched proxies from {site}")
                 return
