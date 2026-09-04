@@ -2124,7 +2124,7 @@ it("includes WWW-Authenticate header when authenticate callback fails with OAuth
   await httpServer.close();
 });
 
-it("does not include WWW-Authenticate header in 401 response without OAuth config", async () => {
+it("includes WWW-Authenticate header in 401 response without OAuth config", async () => {
   const port = await getRandomPort();
 
   const httpServer = await startHTTPServer({
@@ -2155,8 +2155,58 @@ it("does not include WWW-Authenticate header in 401 response without OAuth confi
 
   expect(response.status).toBe(401);
 
+  // RFC 7235 requires a challenge on every 401, OAuth config or not.
   const wwwAuthHeader = response.headers.get("WWW-Authenticate");
-  expect(wwwAuthHeader).toBeNull();
+  expect(wwwAuthHeader).toBe(
+    'Bearer error="invalid_token", error_description="Authentication required"',
+  );
+
+  await httpServer.close();
+});
+
+it("includes WWW-Authenticate header when authenticate rejects without OAuth config", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    authenticate: async () => ({
+      authenticated: false,
+      error: "Access denied",
+    }),
+    createServer: async () =>
+      new Server({ name: "test", version: "1.0.0" }, { capabilities: {} }),
+    port,
+    stateless: true,
+  });
+
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    body: JSON.stringify({
+      id: 7,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      Accept: "application/json, text/event-stream",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  expect(response.status).toBe(401);
+  expect(response.headers.get("WWW-Authenticate")).toBe(
+    'Bearer error="invalid_token", error_description="Access denied"',
+  );
+
+  // The JSON-RPC id of the rejected request is echoed back.
+  expect(await response.json()).toEqual({
+    error: { code: -32000, message: "Access denied" },
+    id: 7,
+    jsonrpc: "2.0",
+  });
 
   await httpServer.close();
 });

@@ -405,7 +405,11 @@ const readListenSubscriptions = (body: unknown): string[] => {
     : [];
 };
 
-// Helper function to get WWW-Authenticate header value
+// Helper function to get WWW-Authenticate header value.
+//
+// RFC 7235 requires every 401 to carry at least one challenge, so this always
+// returns a `Bearer` challenge; OAuth config only enriches it with the optional
+// auth-params. Do not use this for a 403, which has no such requirement.
 const getWWWAuthenticateHeader = (
   oauth?: AuthConfig["oauth"],
   options?: {
@@ -414,34 +418,30 @@ const getWWWAuthenticateHeader = (
     error_uri?: string;
     scope?: string;
   },
-): string | undefined => {
-  if (!oauth) {
-    return undefined;
-  }
-
+): string => {
   const params: string[] = [];
 
   // Add realm if configured
-  if (oauth.realm) {
+  if (oauth?.realm) {
     params.push(`realm="${oauth.realm}"`);
   }
 
   // Add resource_metadata if configured
-  if (oauth.protectedResource?.resource) {
+  if (oauth?.protectedResource?.resource) {
     params.push(
       `resource_metadata="${oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`,
     );
   }
 
   // Add error from options or config (options takes precedence)
-  const error = options?.error || oauth.error;
+  const error = options?.error || oauth?.error;
   if (error) {
     params.push(`error="${error}"`);
   }
 
   // Add error_description from options or config (options takes precedence)
   const error_description =
-    options?.error_description || oauth.error_description;
+    options?.error_description || oauth?.error_description;
   if (error_description) {
     // Escape quotes in error description
     const escaped = error_description.replace(/"/g, '\\"');
@@ -449,20 +449,20 @@ const getWWWAuthenticateHeader = (
   }
 
   // Add error_uri from options or config (options takes precedence)
-  const error_uri = options?.error_uri || oauth.error_uri;
+  const error_uri = options?.error_uri || oauth?.error_uri;
   if (error_uri) {
     params.push(`error_uri="${error_uri}"`);
   }
 
   // Add scope from options or config (options takes precedence)
-  const scope = options?.scope || oauth.scope;
+  const scope = options?.scope || oauth?.scope;
   if (scope) {
     params.push(`scope="${scope}"`);
   }
 
-  // Return undefined if no parameters were added
+  // A bare `Bearer` is a valid challenge (RFC 7235); auth-params are optional.
   if (params.length === 0) {
-    return undefined;
+    return "Bearer";
   }
 
   return `Bearer ${params.join(", ")}`;
@@ -481,9 +481,7 @@ const sendSessionUnauthorizedResponse = ({
     error: "invalid_token",
     error_description: message,
   });
-  if (wwwAuthHeader) {
-    res.setHeader("WWW-Authenticate", wwwAuthHeader);
-  }
+  res.setHeader("WWW-Authenticate", wwwAuthHeader);
 
   res.writeHead(401).end(
     JSON.stringify({
@@ -614,9 +612,7 @@ const handleCreateServerError = async ({
       error_description: errorMessage,
     });
 
-    if (wwwAuthHeader) {
-      res.setHeader("WWW-Authenticate", wwwAuthHeader);
-    }
+    res.setHeader("WWW-Authenticate", wwwAuthHeader);
 
     res.writeHead(401).end(
       JSON.stringify({
@@ -1257,14 +1253,12 @@ const handleStreamRequest = async <T extends ServerLike>({
 
             res.setHeader("Content-Type", "application/json");
 
-            // Add WWW-Authenticate header if OAuth config is available
+            // RFC 7235: a 401 always carries a challenge, OAuth config or not
             const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
               error: "invalid_token",
               error_description: errorMessage,
             });
-            if (wwwAuthHeader) {
-              res.setHeader("WWW-Authenticate", wwwAuthHeader);
-            }
+            res.setHeader("WWW-Authenticate", wwwAuthHeader);
 
             res.writeHead(401).end(
               JSON.stringify({
@@ -1292,14 +1286,12 @@ const handleStreamRequest = async <T extends ServerLike>({
           console.error("Authentication error:", error);
           res.setHeader("Content-Type", "application/json");
 
-          // Add WWW-Authenticate header if OAuth config is available
+          // RFC 7235: a 401 always carries a challenge, OAuth config or not
           const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
             error: "invalid_token",
             error_description: errorMessage,
           });
-          if (wwwAuthHeader) {
-            res.setHeader("WWW-Authenticate", wwwAuthHeader);
-          }
+          res.setHeader("WWW-Authenticate", wwwAuthHeader);
 
           res.writeHead(401).end(
             JSON.stringify({
