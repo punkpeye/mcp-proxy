@@ -133,11 +133,14 @@ describe("AuthenticationMiddleware", () => {
       expect(response1.body).toEqual(response2.body);
     });
 
-    it("should not include WWW-Authenticate header without OAuth config", () => {
+    it("should include WWW-Authenticate header without OAuth config", () => {
       const middleware = new AuthenticationMiddleware({ apiKey: "test" });
       const response = middleware.getUnauthorizedResponse();
 
-      expect(response.headers["WWW-Authenticate"]).toBeUndefined();
+      // RFC 7235 requires a challenge on every 401, OAuth config or not.
+      expect(response.headers["WWW-Authenticate"]).toBe(
+        'Bearer error="invalid_token", error_description="Unauthorized: Invalid or missing API key"',
+      );
     });
 
     it("should include WWW-Authenticate header with OAuth config", () => {
