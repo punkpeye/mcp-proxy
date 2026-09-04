@@ -13,10 +13,10 @@ import { hideBin } from "yargs/helpers";
 const require = createRequire(import.meta.url);
 const packageJson = require("../../package.json") as { version: string };
 
+import { createGracefulShutdown } from "../createGracefulShutdown.js";
 import { proxyServer } from "../proxyServer.js";
 import {
   DEFAULT_ALLOWED_HEADERS,
-  SSEServer,
   startHTTPServer,
 } from "../startHTTPServer.js";
 import {
@@ -379,32 +379,6 @@ const proxy = async () => {
         await tunnel.close();
       }
     },
-  };
-};
-
-const createGracefulShutdown = ({
-  server,
-  timeout,
-}: {
-  server: Pick<SSEServer, "close">;
-  timeout: number;
-}) => {
-  const gracefulShutdown = () => {
-    console.info("received shutdown signal; shutting down");
-
-    server.close();
-
-    setTimeout(() => {
-      // Exit with non-zero code to indicate failure to shutdown gracefully
-      process.exit(1);
-    }, timeout).unref();
-  };
-
-  process.once("SIGTERM", gracefulShutdown);
-  process.once("SIGINT", gracefulShutdown);
-
-  return () => {
-    server.close();
   };
 };
 
