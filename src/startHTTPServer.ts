@@ -833,6 +833,30 @@ type ModernLeg<T> = {
 };
 
 /**
+ * Whether a freshly built server instance can serve the 2026-07-28 modern
+ * route.
+ *
+ * The first thing the modern SDK handler does when it starts serving a modern
+ * request is dereference `server._supportedProtocolVersions` (an array) inside
+ * `installDiscoverHandler`. A server built by the 1.x MCP SDK - which is what
+ * fastmcp <=4.x hands mcp-proxy through its `^6.4.6` range - never sets that
+ * property, so the dereference throws `Cannot read properties of undefined
+ * (reading 'includes')` before the session is usable, and the failure surfaces
+ * only against real 2026-07-28 traffic while legacy-handshake tests stay green
+ * (issue #96).
+ *
+ * Duck-typing the exact property the SDK reads is the narrowest predicate that
+ * predicts the crash: it does not depend on SDK class identity (unreliable
+ * across duplicated or hoisted copies of the SDK) and it keeps working if some
+ * future non-SDK server legitimately declares the same array.
+ */
+const canServeModernRoute = (server: unknown): boolean =>
+  Array.isArray(
+    (server as { _supportedProtocolVersions?: unknown })
+      ._supportedProtocolVersions,
+  );
+
+/**
  * `createMcpHandler`'s factory is handed an era, not the underlying Node
  * request, but `createServer` is defined in terms of that request (consumers
  * derive per-request auth and context from it). `AsyncLocalStorage` carries the
@@ -901,6 +925,34 @@ const createModernLeg = <T extends ServerLike>({
     target.onclose = teardown;
 
     try {
+      // Refuse the modern route cleanly when `createServer` handed us an
+      // instance the 2026-07-28 SDK handler cannot serve (a 1.x-SDK server -
+      // see `canServeModernRoute`). Throwing here rather than routing to
+      // `handle` turns what would be an opaque 500 from a TypeError deep inside
+      // the SDK into a proper "unsupported protocol version" JSON-RPC error:
+      // the throw runs the same teardown as any other `createInstance` failure
+      // and reaches `handleCreateServerError`, which honors a thrown `Response`
+      // verbatim. The check lives inside the try so the just-built instance is
+      // torn down (its upstream sink released) exactly as on any other failure.
+      if (!canServeModernRoute(server)) {
+        throw new Response(
+          JSON.stringify({
+            error: {
+              code: -32000,
+              data: { reason: "server_missing_modern_protocol_support" },
+              message:
+                "Unsupported protocol version: the server instance cannot serve the 2026-07-28 protocol revision. It was built by the 1.x MCP SDK (e.g. fastmcp <=4.x pulling mcp-proxy through its `^6.4.6` range), which does not declare `_supportedProtocolVersions`. Upgrade the framework that builds it, or serve only 2025-era clients (`modern: false`).",
+            },
+            id: getRequestId(body),
+            jsonrpc: "2.0",
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
       if (onListenSubscriptions) {
         const listenUris = readListenSubscriptions(body);
 
