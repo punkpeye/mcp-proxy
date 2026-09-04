@@ -10,6 +10,7 @@ import {
   isInitializeRequest,
   isLegacyRequest,
   McpHttpHandler,
+  McpServer,
   Server,
   ServerNotifier,
 } from "@modelcontextprotocol/server";
@@ -846,15 +847,28 @@ type ModernLeg<T> = {
  * (issue #96).
  *
  * Duck-typing the exact property the SDK reads is the narrowest predicate that
- * predicts the crash: it does not depend on SDK class identity (unreliable
- * across duplicated or hoisted copies of the SDK) and it keeps working if some
- * future non-SDK server legitimately declares the same array.
+ * predicts the crash, because it does not depend on the instance being any
+ * particular class - only on the dereference the SDK is about to perform.
+ *
+ * The one thing that must be mirrored is *which* object gets dereferenced:
+ * `serveModern` unwraps an `McpServer` to its inner `.server` first, so a
+ * high-level instance has to be judged by that inner server. The wrapper itself
+ * never declares the property, so checking it directly would refuse every
+ * consumer using the SDK's high-level API. `instanceof` is the right test here
+ * despite class identity being fragile in general: `McpServer` is imported from
+ * the same module instance that provides `createMcpHandler`, so this comparison
+ * is the very one `serveModern` makes - when it does not unwrap (a duplicated
+ * SDK copy), neither do we, and the predicate still names the object that
+ * actually crashes.
  */
-const canServeModernRoute = (server: unknown): boolean =>
-  Array.isArray(
-    (server as { _supportedProtocolVersions?: unknown })
+const canServeModernRoute = (server: unknown): boolean => {
+  const target = server instanceof McpServer ? server.server : server;
+
+  return Array.isArray(
+    (target as { _supportedProtocolVersions?: unknown })
       ._supportedProtocolVersions,
   );
+};
 
 /**
  * `createMcpHandler`'s factory is handed an era, not the underlying Node

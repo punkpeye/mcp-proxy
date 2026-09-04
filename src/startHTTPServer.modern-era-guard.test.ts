@@ -1,4 +1,4 @@
-import { Server } from "@modelcontextprotocol/server";
+import { McpServer, Server } from "@modelcontextprotocol/server";
 import { getRandomPort } from "get-port-please";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -42,6 +42,24 @@ const makeLegacyEraServer = (): Server => {
 };
 
 const MODERN_PROTOCOL_VERSION = "2026-07-28";
+
+// The high-level API: `createServer` hands back an `McpServer`, whose inner
+// `.server` is what the SDK dereferences. The guard must let this through - the
+// wrapper never declares `_supportedProtocolVersions` itself.
+const makeHighLevelServer = (): McpServer => {
+  const server = new McpServer(
+    { name: "high-level-server", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+
+  server.registerTool(
+    "ping",
+    { description: "ping", inputSchema: {} },
+    async () => ({ content: [{ text: "pong", type: "text" as const }] }),
+  );
+
+  return server;
+};
 
 // A request that mcp-proxy classifies as modern: a JSON-RPC request whose
 // params carry the required 2026-07-28 `_meta` envelope, with the matching
@@ -110,4 +128,25 @@ it("does not crash the modern leg when createServer returns a 1.x-SDK server (#9
   expect(body.id).toBe(1);
   expect(body.error).toBeDefined();
   expect(body.error?.message).toMatch(/unsupported protocol version/i);
+});
+
+it("still serves the modern leg when createServer returns an McpServer", async () => {
+  // The guard must key off the object `serveModern` actually dereferences. It
+  // unwraps `McpServer` to its inner `.server`, so judging the wrapper - which
+  // never declares `_supportedProtocolVersions` - would refuse every consumer
+  // on the SDK's high-level API, turning a crash fix into a total outage.
+  const port = await getRandomPort();
+  const httpServer = await startHTTPServer({
+    createServer: async () => makeHighLevelServer(),
+    port,
+  });
+  running.push(httpServer);
+
+  const response = await modernRequest(port);
+  const body = (await response.json()) as {
+    result?: { tools?: Array<{ name: string }> };
+  };
+
+  expect(response.status).toBe(200);
+  expect(body.result?.tools?.map((tool) => tool.name)).toEqual(["ping"]);
 });
