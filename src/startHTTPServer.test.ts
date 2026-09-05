@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { Server } from "@modelcontextprotocol/server";
 import { ServerCapabilities } from "@modelcontextprotocol/server";
+import { SSEServerTransport } from "@modelcontextprotocol/server-legacy/sse";
 import { EventSource } from "eventsource";
 import fs from "fs";
 import { getRandomPort } from "get-port-please";
@@ -2960,6 +2961,56 @@ it("does not crash when the SSE connect error path runs after headers are sent",
 
     expect(unhandledRejections).toEqual([]);
   } finally {
+    await httpServer.close();
+    consoleError.mockRestore();
+    process.off("unhandledRejection", onUnhandledRejection);
+  }
+});
+
+it("settles a rejected legacy SSE message without an unhandled rejection", async () => {
+  const port = await getRandomPort();
+  const unhandledRejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const httpServer = await startHTTPServer({
+    createServer: async () =>
+      new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: { tools: {} } },
+      ),
+    port,
+  });
+  const client = new Client(
+    { name: "sse-error-client", version: "1.0.0" },
+    { capabilities: {} },
+  );
+  const transport = new SSEClientTransport(
+    new URL(`http://localhost:${port}/sse`),
+  );
+
+  try {
+    await client.connect(transport);
+    const messageError = new Error("simulated SSE message failure");
+    const handlePostMessage = vi
+      .spyOn(SSEServerTransport.prototype, "handlePostMessage")
+      .mockRejectedValueOnce(messageError);
+
+    await expect(client.listTools()).rejects.toThrow();
+    await delay(100);
+
+    expect(handlePostMessage).toHaveBeenCalledOnce();
+    expect(consoleError).toHaveBeenCalledWith(
+      "[mcp-proxy] error handling SSE message",
+      messageError,
+    );
+    expect(unhandledRejections).toEqual([]);
+    handlePostMessage.mockRestore();
+  } finally {
+    await client.close().catch(() => undefined);
     await httpServer.close();
     consoleError.mockRestore();
     process.off("unhandledRejection", onUnhandledRejection);
