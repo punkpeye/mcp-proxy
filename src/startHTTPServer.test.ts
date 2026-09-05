@@ -2929,16 +2929,18 @@ it("does not crash when the SSE connect error path runs after headers are sent",
   };
   process.on("unhandledRejection", onUnhandledRejection);
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+  const server = new Server(
+    { name: "test", version: "1.0.0" },
+    { capabilities: {} },
+  );
+  const close = vi.spyOn(server, "close");
+  const onClose = vi.fn();
 
   const httpServer = await startHTTPServer({
-    createServer: async () => {
-      return new Server(
-        { name: "test", version: "1.0.0" },
-        { capabilities: {} },
-      );
-    },
+    createServer: async () => server,
     // server.connect() and the initial transport.send() succeed, so the
     // SSE 200 headers are already on the wire when this throws.
+    onClose,
     onConnect: async () => {
       throw new Error("simulated connect failure");
     },
@@ -2959,8 +2961,11 @@ it("does not crash when the SSE connect error path runs after headers are sent",
     await delay(100);
 
     expect(unhandledRejections).toEqual([]);
+    expect(close).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
   } finally {
     await httpServer.close();
+    close.mockRestore();
     consoleError.mockRestore();
     process.off("unhandledRejection", onUnhandledRejection);
   }

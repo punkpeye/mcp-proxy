@@ -1758,8 +1758,20 @@ const handleSSERequest = async <T extends ServerLike>({
       if (!closed) {
         console.error("[mcp-proxy] error connecting to server", error);
 
+        // This session was published in activeTransports before connect so
+        // legacy clients could use the endpoint sent over SSE. A failure here
+        // leaves that entry unusable and keeps any server-owned resources
+        // alive unless we tear it down explicitly. Claim cleanup before
+        // closing: server.close() closes the transport, which re-enters the
+        // response close handler above.
+        isCleaningUp = true;
+        await cleanupServer(server, onClose);
+        delete activeTransports[transport.sessionId];
+
         if (!res.headersSent) {
           res.writeHead(500).end("Error connecting to server");
+        } else {
+          res.end();
         }
       }
     }
