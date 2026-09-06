@@ -1804,7 +1804,20 @@ const handleSSERequest = async <T extends ServerLike>({
     // The SSE endpoint is therefore bounded by whatever limit the SDK applies,
     // not by the stream endpoint's. Front this with a gateway limit if you need
     // the two to match.
-    await activeTransport.handlePostMessage(req, res);
+    try {
+      await activeTransport.handlePostMessage(req, res);
+    } catch (error) {
+      // The request listener passed to createServer is async and Node does not
+      // observe its returned promise. Settle failures here instead of letting
+      // a rejected legacy SSE POST become an unhandled rejection.
+      console.error("[mcp-proxy] error handling SSE message", error);
+
+      if (res.headersSent) {
+        res.end();
+      } else {
+        res.writeHead(500).end("Error handling SSE message");
+      }
+    }
 
     return true;
   }
