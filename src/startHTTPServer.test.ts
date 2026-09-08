@@ -23,6 +23,44 @@ if (!("EventSource" in global)) {
   global.EventSource = EventSource;
 }
 
+it("rejects when the HTTP listener cannot bind", async () => {
+  const blocker = net.createServer();
+  await new Promise<void>((resolve, reject) => {
+    blocker.once("error", reject);
+    blocker.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = blocker.address();
+  if (!address || typeof address === "string") {
+    blocker.close();
+    throw new Error("Expected a TCP listener address");
+  }
+
+  try {
+    await expect(
+      startHTTPServer({
+        createServer: async () =>
+          new Server(
+            { name: "test", version: "1.0.0" },
+            { capabilities: {} },
+          ),
+        host: "127.0.0.1",
+        port: address.port,
+      }),
+    ).rejects.toMatchObject({ code: "EADDRINUSE" });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      blocker.close((error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+});
+
 it("proxies messages between HTTP stream and stdio servers", async () => {
   const stdioTransport = new StdioClientTransport({
     args: ["src/fixtures/simple-stdio-server.ts"],
