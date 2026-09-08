@@ -94,39 +94,48 @@ export const startStdioServer = async ({
 
   await streamClient.connect(transport);
 
-  const serverVersion = streamClient.getServerVersion() as {
-    name: string;
-    version: string;
-  };
+  try {
+    const serverVersion = streamClient.getServerVersion() as {
+      name: string;
+      version: string;
+    };
 
-  const serverCapabilities =
-    streamClient.getServerCapabilities() as ServerCapabilities;
+    const serverCapabilities =
+      streamClient.getServerCapabilities() as ServerCapabilities;
 
-  const stdioServer = initStdioServer
-    ? await initStdioServer()
-    : new Server(serverVersion, {
-        capabilities: serverCapabilities,
-      });
+    const stdioServer = initStdioServer
+      ? await initStdioServer()
+      : new Server(serverVersion, {
+          capabilities: serverCapabilities,
+        });
 
-  await proxyServer({
-    client: streamClient,
-    server: stdioServer,
-    serverCapabilities,
-  });
+    await proxyServer({
+      client: streamClient,
+      server: stdioServer,
+      serverCapabilities,
+    });
 
-  // A bare `connect(new StdioServerTransport())`, which binds the connection to
-  // the 2025 era at `initialize`. Serving 2026-07-28 here needs `serveStdio`,
-  // and that entry wants a factory it can call more than once - it builds a
-  // separate instance for a `server/discover` probe and closes it again. Handing
-  // it this one instance instead lets the probe pin its version and then close
-  // it, which leaves the connection answering neither era; and because the entry
-  // connects a transport only when the first message arrives, the `Server` this
-  // function returns would no longer be connected when it returns.
-  //
-  // Both are fixable, but not by reusing one instance, so this stays on the
-  // 2025-era path until the return contract is reworked to hand back the
-  // entry's own handle.
-  await stdioServer.connect(new StdioServerTransport());
+    // A bare `connect(new StdioServerTransport())`, which binds the connection to
+    // the 2025 era at `initialize`. Serving 2026-07-28 here needs `serveStdio`,
+    // and that entry wants a factory it can call more than once - it builds a
+    // separate instance for a `server/discover` probe and closes it again. Handing
+    // it this one instance instead lets the probe pin its version and then close
+    // it, which leaves the connection answering neither era; and because the entry
+    // connects a transport only when the first message arrives, the `Server` this
+    // function returns would no longer be connected when it returns.
+    //
+    // Both are fixable, but not by reusing one instance, so this stays on the
+    // 2025-era path until the return contract is reworked to hand back the
+    // entry's own handle.
+    await stdioServer.connect(new StdioServerTransport());
 
-  return stdioServer;
+    return stdioServer;
+  } catch (error) {
+    try {
+      await streamClient.close();
+    } catch {
+      // Preserve the startup error; cleanup failure is secondary here.
+    }
+    throw error;
+  }
 };
