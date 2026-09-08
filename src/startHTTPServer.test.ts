@@ -953,6 +953,60 @@ it("allows onUnhandledRequest to serve routes without auth", async () => {
   await httpServer.close();
 });
 
+it("settles a custom route when onUnhandledRequest rejects", async () => {
+  const port = await getRandomPort();
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const httpServer = await startHTTPServer({
+    createServer: async () =>
+      new Server({ name: "test", version: "1.0.0" }, { capabilities: {} }),
+    onUnhandledRequest: async () => {
+      throw new Error("custom route failed");
+    },
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/health`);
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe("Error handling custom route");
+    expect(consoleError).toHaveBeenCalledWith(
+      "[mcp-proxy] error handling custom route",
+      expect.objectContaining({ message: "custom route failed" }),
+    );
+  } finally {
+    consoleError.mockRestore();
+    await httpServer.close();
+  }
+});
+
+it("ends a custom route rejection after headers were sent", async () => {
+  const port = await getRandomPort();
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const httpServer = await startHTTPServer({
+    createServer: async () =>
+      new Server({ name: "test", version: "1.0.0" }, { capabilities: {} }),
+    onUnhandledRequest: async (_req, res) => {
+      res.writeHead(200);
+      res.write("partial response");
+      throw new Error("custom stream failed");
+    },
+    port,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/health`);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("partial response");
+  } finally {
+    consoleError.mockRestore();
+    await httpServer.close();
+  }
+});
+
 it("routes MCP stream endpoint to handleStreamRequest even when onUnhandledRequest closes response for unknown paths", async () => {
   // Regression test for the interaction between PR #59 and consumers
   // (e.g. fastmcp) whose onUnhandledRequest handler writes 404 for any path

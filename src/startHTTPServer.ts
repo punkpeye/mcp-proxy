@@ -2008,7 +2008,20 @@ export const startHTTPServer = async <T extends ServerLike>({
     // Let non-MCP routes (e.g. /health, /ready, OAuth metadata) be handled
     // before auth — API key auth protects MCP protocol endpoints, not custom routes.
     if (onUnhandledRequest && !isMcpEndpoint) {
-      await onUnhandledRequest(req, res);
+      try {
+        await onUnhandledRequest(req, res);
+      } catch (error) {
+        console.error("[mcp-proxy] error handling custom route", error);
+
+        if (res.headersSent) {
+          res.end();
+        } else {
+          res.writeHead(500).end("Error handling custom route");
+        }
+
+        return;
+      }
+
       if (res.writableEnded) {
         return;
       }
