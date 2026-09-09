@@ -2148,11 +2148,38 @@ export const startHTTPServer = async <T extends ServerLike>({
   // Reclaiming memory is not a reason to keep a process alive.
   sessionReaper?.unref();
 
-  await new Promise((resolve) => {
-    httpServer.listen(port, host, () => {
-      resolve(undefined);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        httpServer.off("error", onError);
+        httpServer.off("listening", onListening);
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      const onListening = () => {
+        cleanup();
+        resolve();
+      };
+
+      httpServer.once("error", onError);
+      httpServer.once("listening", onListening);
+
+      try {
+        httpServer.listen(port, host);
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
     });
-  });
+  } catch (error) {
+    if (sessionReaper) {
+      clearInterval(sessionReaper);
+    }
+
+    throw error;
+  }
 
   return {
     close: async () => {
