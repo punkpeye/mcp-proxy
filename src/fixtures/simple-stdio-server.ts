@@ -10,6 +10,7 @@ const server = new Server(
     capabilities: {
       resources: { subscribe: true },
     },
+    instructions: "Use this server for example resources.",
   },
 );
 
