@@ -1,12 +1,12 @@
 import { Client } from "@modelcontextprotocol/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { Server } from "@modelcontextprotocol/server";
-import { ProtocolError, ServerCapabilities } from "@modelcontextprotocol/server";
+import { ProtocolError } from "@modelcontextprotocol/server";
 import { EventSource } from "eventsource";
 import { getRandomPort } from "get-port-please";
 import { describe, expect, it } from "vitest";
 
+import { createProxyServer } from "./createProxyServer.js";
 import { proxyServer } from "./proxyServer.js";
 import { startHTTPServer } from "./startHTTPServer.js";
 
@@ -55,25 +55,19 @@ async function createTestEnvironment(
 
   await stdioClient.connect(stdioTransport);
 
-  const serverVersion = stdioClient.getServerVersion() as {
-    name: string;
-    version: string;
-  };
-  const serverCapabilities = stdioClient.getServerCapabilities() as ServerCapabilities;
+  const { serverCapabilities } = createProxyServer(stdioClient);
   const port = await getRandomPort();
 
   const httpServer = await startHTTPServer({
     createServer: async () => {
-      const mcpServer = new Server(serverVersion, {
-        capabilities: serverCapabilities,
-      });
+      const { server } = createProxyServer(stdioClient);
       await proxyServer({
         client: stdioClient,
         requestTimeout,
-        server: mcpServer,
+        server,
         serverCapabilities,
       });
-      return mcpServer;
+      return server;
     },
     port,
   });
@@ -100,6 +94,16 @@ async function createTestEnvironment(
 }
 
 describe("proxyServer timeout functionality", () => {
+  it("preserves upstream server instructions", async () => {
+    const { cleanup, streamClient } = await createTestEnvironment();
+
+    expect(streamClient.getInstructions()).toBe(
+      "Use this server for example resources.",
+    );
+
+    await cleanup();
+  }, 10000);
+
   it("should respect custom timeout settings", async () => {
     const { cleanup, streamClient } = await createTestEnvironment({
       requestTimeout: 1000,

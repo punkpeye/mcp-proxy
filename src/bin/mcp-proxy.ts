@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { Client } from "@modelcontextprotocol/client";
-import { Server, ServerCapabilities } from "@modelcontextprotocol/server";
 import { EventSource } from "eventsource";
 import { createRequire } from "node:module";
 import { setTimeout } from "node:timers";
@@ -14,6 +13,7 @@ const require = createRequire(import.meta.url);
 const packageJson = require("../../package.json") as { version: string };
 
 import { createGracefulShutdown } from "../createGracefulShutdown.js";
+import { createProxyServer } from "../createProxyServer.js";
 import { proxyServer } from "../proxyServer.js";
 import {
   DEFAULT_ALLOWED_HEADERS,
@@ -280,19 +280,10 @@ const proxy = async () => {
 
   await connect(client, argv.connectionTimeout);
 
-  const serverVersion = client.getServerVersion() as {
-    name: string;
-    version: string;
-  };
-
-  const serverCapabilities = client.getServerCapabilities() as ServerCapabilities;
-
   console.info("starting server on port %d", argv.port);
 
   const createServer = async () => {
-    const server = new Server(serverVersion, {
-      capabilities: serverCapabilities,
-    });
+    const { server, serverCapabilities } = createProxyServer(client);
 
     await proxyServer({
       client,
