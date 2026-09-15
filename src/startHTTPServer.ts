@@ -468,6 +468,21 @@ const getWWWAuthenticateHeader = (
   return `Bearer ${params.join(", ")}`;
 };
 
+/**
+ * Answers a request carrying an `Mcp-Session-Id` this process does not hold:
+ * one it never issued, reaped, or lost to a restart or another replica. The
+ * spec requires a 404 for these whatever the verb, and it has to stay a 404
+ * when `authenticate` is set - it is the status that tells a client to start a
+ * new session, where a 401 sends it to re-authorize instead.
+ */
+const sendSessionNotFoundResponse = (res: http.ServerResponse): void => {
+  res.setHeader("Content-Type", "application/json");
+
+  res
+    .writeHead(404)
+    .end(createJsonRpcErrorResponse(-32001, "Session not found"));
+};
+
 const sendSessionUnauthorizedResponse = ({
   body,
   oauth,
@@ -629,6 +644,115 @@ const handleCreateServerError = async ({
   }
 
   res.writeHead(500).end("Error creating server");
+};
+
+type AuthenticationOutcome =
+  | { readonly authResult: unknown; readonly rejected?: never }
+  | { readonly rejected: true };
+
+/**
+ * Runs the consumer's `authenticate` callback, when there is one, and answers a
+ * rejection itself: a thrown `Response` verbatim, anything else as a 401.
+ *
+ * The stream endpoint runs this before it looks a session up, on every verb.
+ * That ordering is what lets a caller whose credentials pass but whose session
+ * is gone be told so with a 404, while a caller whose credentials fail gets its
+ * 401 challenge whether or not the session exists.
+ */
+const authenticateRequest = async ({
+  authenticate,
+  body,
+  oauth,
+  req,
+  res,
+}: {
+  readonly authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
+  readonly body?: unknown;
+  readonly oauth?: AuthConfig["oauth"];
+  readonly req: http.IncomingMessage;
+  readonly res: http.ServerResponse;
+}): Promise<AuthenticationOutcome> => {
+  if (!authenticate) {
+    return { authResult: undefined };
+  }
+
+  try {
+    const authResult = await authenticate(req);
+
+    // Check for both falsy AND { authenticated: false } pattern
+    if (
+      !authResult ||
+      (typeof authResult === "object" &&
+        "authenticated" in authResult &&
+        !authResult.authenticated)
+    ) {
+      // Extract error message if available
+      const errorMessage =
+        authResult &&
+        typeof authResult === "object" &&
+        "error" in authResult &&
+        typeof authResult.error === "string"
+          ? authResult.error
+          : "Unauthorized: Authentication failed";
+
+      res.setHeader("Content-Type", "application/json");
+
+      // RFC 7235: a 401 always carries a challenge, OAuth config or not
+      const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
+        error: "invalid_token",
+        error_description: errorMessage,
+      });
+      res.setHeader("WWW-Authenticate", wwwAuthHeader);
+
+      res.writeHead(401).end(
+        JSON.stringify({
+          error: {
+            code: -32000,
+            message: errorMessage,
+          },
+          id: (body as { id?: unknown })?.id ?? null,
+          jsonrpc: "2.0",
+        }),
+      );
+
+      return { rejected: true };
+    }
+
+    return { authResult };
+  } catch (error) {
+    // Check if error is a Response object with headers already set
+    if (await handleResponseError(error, res)) {
+      return { rejected: true };
+    }
+
+    // Extract error details from thrown errors
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "Unauthorized: Authentication error";
+    console.error("Authentication error:", error);
+    res.setHeader("Content-Type", "application/json");
+
+    // RFC 7235: a 401 always carries a challenge, OAuth config or not
+    const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
+      error: "invalid_token",
+      error_description: errorMessage,
+    });
+    res.setHeader("WWW-Authenticate", wwwAuthHeader);
+
+    res.writeHead(401).end(
+      JSON.stringify({
+        error: {
+          code: -32000,
+          message: errorMessage,
+        },
+        id: (body as { id?: unknown })?.id ?? null,
+        jsonrpc: "2.0",
+      }),
+    );
+
+    return { rejected: true };
+  }
 };
 
 // Helper function to clean up server resources
@@ -1230,82 +1354,19 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       // Per-request authentication for all requests
       // Store authResult to update existing sessions with fresh auth context
-      let authResult: unknown;
-      if (authenticate) {
-        try {
-          authResult = await authenticate(req);
+      const authentication = await authenticateRequest({
+        authenticate,
+        body,
+        oauth,
+        req,
+        res,
+      });
 
-          // Check for both falsy AND { authenticated: false } pattern
-          if (
-            !authResult ||
-            (typeof authResult === "object" &&
-              "authenticated" in authResult &&
-              !authResult.authenticated)
-          ) {
-            // Extract error message if available
-            const errorMessage =
-              authResult &&
-              typeof authResult === "object" &&
-              "error" in authResult &&
-              typeof authResult.error === "string"
-                ? authResult.error
-                : "Unauthorized: Authentication failed";
-
-            res.setHeader("Content-Type", "application/json");
-
-            // RFC 7235: a 401 always carries a challenge, OAuth config or not
-            const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
-              error: "invalid_token",
-              error_description: errorMessage,
-            });
-            res.setHeader("WWW-Authenticate", wwwAuthHeader);
-
-            res.writeHead(401).end(
-              JSON.stringify({
-                error: {
-                  code: -32000,
-                  message: errorMessage,
-                },
-                id: (body as { id?: unknown })?.id ?? null,
-                jsonrpc: "2.0",
-              }),
-            );
-            return true;
-          }
-        } catch (error) {
-          // Check if error is a Response object with headers already set
-          if (await handleResponseError(error, res)) {
-            return true;
-          }
-
-          // Extract error details from thrown errors
-          const errorMessage =
-            error instanceof Error
-              ? error.message
-              : "Unauthorized: Authentication error";
-          console.error("Authentication error:", error);
-          res.setHeader("Content-Type", "application/json");
-
-          // RFC 7235: a 401 always carries a challenge, OAuth config or not
-          const wwwAuthHeader = getWWWAuthenticateHeader(oauth, {
-            error: "invalid_token",
-            error_description: errorMessage,
-          });
-          res.setHeader("WWW-Authenticate", wwwAuthHeader);
-
-          res.writeHead(401).end(
-            JSON.stringify({
-              error: {
-                code: -32000,
-                message: errorMessage,
-              },
-              id: (body as { id?: unknown })?.id ?? null,
-              jsonrpc: "2.0",
-            }),
-          );
-          return true;
-        }
+      if (authentication.rejected) {
+        return true;
       }
+
+      const { authResult } = authentication;
 
       // Era classification, once, at the entry boundary. `isLegacyRequest` is
       // the SDK's own routing predicate rather than a re-implementation, so
@@ -1352,16 +1413,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       if (sessionId) {
         const activeTransport = activeTransports[sessionId];
         if (!activeTransport) {
-          if (authenticate && isJsonRpcBody(body)) {
-            sendSessionUnauthorizedResponse({ body, oauth, res });
-
-            return true;
-          }
-
-          res.setHeader("Content-Type", "application/json");
-          res
-            .writeHead(404)
-            .end(createJsonRpcErrorResponse(-32001, "Session not found"));
+          sendSessionNotFoundResponse(res);
 
           return true;
         }
@@ -1561,19 +1613,18 @@ const handleStreamRequest = async <T extends ServerLike>({
     req.method === "GET" &&
     new URL(req.url!, "http://localhost").pathname === endpoint
   ) {
+    // Return METHOD_NOT_ALLOWED so stateless clients' transport stops
+    // reconnecting. Nothing issues session IDs in stateless mode, so that holds
+    // for a client still sending one from before the switch as well.
+    if (stateless) {
+      res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
+
+      return true;
+    }
+
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
-    const activeTransport: StreamSession<T> | undefined = sessionId
-      ? activeTransports[sessionId]
-      : undefined;
 
     if (!sessionId) {
-      // Return METHOD_NOT_ALLOWED so stateless clients' transport stops reconnecting
-      if (stateless) {
-        res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
-
-        return true;
-      }
-
       if (authenticate) {
         sendSessionUnauthorizedResponse({ oauth, res });
 
@@ -1585,14 +1636,30 @@ const handleStreamRequest = async <T extends ServerLike>({
       return true;
     }
 
+    // Claimed before `authenticate` for the reason the POST branch claims
+    // before its awaits: a slow callback must not let the reaper close the
+    // session this stream is about to attach to.
+    const pendingSession = activeTransports[sessionId];
+
+    if (pendingSession) {
+      trackSessionStream(pendingSession, res);
+    }
+
+    const authentication = await authenticateRequest({
+      authenticate,
+      oauth,
+      req,
+      res,
+    });
+
+    if (authentication.rejected) {
+      return true;
+    }
+
+    const activeTransport = activeTransports[sessionId];
+
     if (!activeTransport) {
-      if (authenticate) {
-        sendSessionUnauthorizedResponse({ oauth, res });
-
-        return true;
-      }
-
-      res.writeHead(400).end("No active transport");
+      sendSessionNotFoundResponse(res);
 
       return true;
     }
@@ -1609,7 +1676,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       );
     }
 
-    trackSessionStream(activeTransport, res);
+    // Already claimed above, before `authenticate`.
 
     try {
       await activeTransport.transport.handleRequest(req, res);
@@ -1638,6 +1705,15 @@ const handleStreamRequest = async <T extends ServerLike>({
   ) {
     console.log("[mcp-proxy] received delete request");
 
+    // Stateless mode holds no sessions, so there is nothing for a DELETE to
+    // end. 405 is the spec's answer for a server that does not let clients
+    // terminate sessions.
+    if (stateless) {
+      res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
+
+      return true;
+    }
+
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
     if (!sessionId) {
@@ -1654,16 +1730,22 @@ const handleStreamRequest = async <T extends ServerLike>({
 
     console.log("[mcp-proxy] received delete request for session", sessionId);
 
+    const authentication = await authenticateRequest({
+      authenticate,
+      oauth,
+      req,
+      res,
+    });
+
+    if (authentication.rejected) {
+      return true;
+    }
+
     const activeTransport = activeTransports[sessionId];
 
     if (!activeTransport) {
-      if (authenticate) {
-        sendSessionUnauthorizedResponse({ oauth, res });
+      sendSessionNotFoundResponse(res);
 
-        return true;
-      }
-
-      res.writeHead(400).end("No active transport");
       return true;
     }
 
