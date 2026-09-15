@@ -1325,6 +1325,191 @@ it("keeps malformed authenticated stream requests as 400", async () => {
   }
 });
 
+it("returns 404 for an unknown session ID once authenticate has passed", async () => {
+  const port = await getRandomPort();
+  const authenticate = vi.fn().mockResolvedValue({ userId: "test-user" });
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  // What a client holds after a restart, a request routed to another replica,
+  // or an idle reap: good credentials and a session this process does not
+  // have. Only a 404 tells it to re-initialize; a 401 sends it to re-authorize.
+  const headers = {
+    Accept: "application/json, text/event-stream",
+    Authorization: "Bearer valid-token",
+    "Content-Type": "application/json",
+    "mcp-session-id": "11111111-2222-3333-4444-555555555555",
+  };
+
+  try {
+    const responses = [
+      await fetch(`http://localhost:${port}/mcp`, {
+        body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+        headers,
+        method: "POST",
+      }),
+      await fetch(`http://localhost:${port}/mcp`, { headers, method: "GET" }),
+      await fetch(`http://localhost:${port}/mcp`, {
+        headers,
+        method: "DELETE",
+      }),
+    ];
+
+    for (const response of responses) {
+      expect(response.status).toBe(404);
+      expect(response.headers.get("www-authenticate")).toBeNull();
+      expect(await response.json()).toMatchObject({
+        error: { code: -32001, message: "Session not found" },
+      });
+    }
+
+    expect(authenticate).toHaveBeenCalledTimes(3);
+  } finally {
+    await httpServer.close();
+  }
+});
+
+it("authenticates stream GET and DELETE requests that carry a session ID", async () => {
+  const port = await getRandomPort();
+  const authenticate = vi.fn(async (request: http.IncomingMessage) =>
+    request.headers.authorization === "Bearer valid-token"
+      ? { userId: "test-user" }
+      : { authenticated: false, error: "Unauthorized: Invalid token" },
+  );
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+  });
+
+  const controller = new AbortController();
+
+  try {
+    const initialize = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0.0" },
+          protocolVersion: "2025-03-26",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: "Bearer valid-token",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    const sessionId = initialize.headers.get("mcp-session-id");
+
+    await initialize.text();
+
+    expect(sessionId).toBeTruthy();
+
+    // A session ID is not a credential: holding one must not be enough to
+    // attach to the session's stream or to end it.
+    for (const method of ["GET", "DELETE"]) {
+      const response = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: "Bearer invalid-token",
+          "mcp-session-id": sessionId!,
+        },
+        method,
+      });
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("www-authenticate")).toContain(
+        'error="invalid_token"',
+      );
+    }
+
+    // Still there after the rejected DELETE, and served once the credentials
+    // are good.
+    const stream = await fetch(`http://localhost:${port}/mcp`, {
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: "Bearer valid-token",
+        "mcp-session-id": sessionId!,
+      },
+      method: "GET",
+      signal: controller.signal,
+    });
+
+    expect(stream.status).toBe(200);
+
+    controller.abort();
+
+    const terminated = await fetch(`http://localhost:${port}/mcp`, {
+      headers: {
+        Authorization: "Bearer valid-token",
+        "mcp-session-id": sessionId!,
+      },
+      method: "DELETE",
+    });
+
+    expect(terminated.status).toBe(200);
+  } finally {
+    controller.abort();
+
+    await httpServer.close();
+  }
+});
+
+it("returns 405 for stream GET and DELETE requests in stateless mode", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    authenticate: vi.fn().mockResolvedValue({ userId: "test-user" }),
+    createServer: async () => {
+      return new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+    },
+    port,
+    stateless: true,
+  });
+
+  try {
+    // Nothing issues session IDs in stateless mode. This one is left over from
+    // before the switch, and must not turn the answer into an auth failure.
+    for (const method of ["GET", "DELETE"]) {
+      const response = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          Authorization: "Bearer valid-token",
+          "mcp-session-id": "11111111-2222-3333-4444-555555555555",
+        },
+        method,
+      });
+
+      expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("POST");
+    }
+  } finally {
+    await httpServer.close();
+  }
+});
+
 it("returns 401 when authenticate callback returns null in stateless mode", async () => {
   const stdioTransport = new StdioClientTransport({
     args: ["src/fixtures/simple-stdio-server.ts"],
@@ -2863,7 +3048,7 @@ it("DELETE request terminates session cleanly and calls onClose exactly once", a
   await stdioClient.close();
 }, 15000);
 
-it("DELETE request to non-existent session returns 400", async () => {
+it("DELETE request to non-existent session returns 404", async () => {
   const stdioTransport = new StdioClientTransport({
     args: ["src/fixtures/simple-stdio-server.ts"],
     command: "tsx",
@@ -2927,7 +3112,8 @@ it("DELETE request to non-existent session returns 400", async () => {
     },
   );
 
-  expect(response.statusCode).toBe(400);
+  expect(response.statusCode).toBe(404);
+  expect(response.text).toContain("Session not found");
 
   await httpServer.close();
   await stdioClient.close();
