@@ -159,7 +159,7 @@ describe("AuthenticationMiddleware", () => {
       );
     });
 
-    it("should handle OAuth config with trailing slash in resource URL", () => {
+    it("should remove the host trailing slash before the RFC 9728 well-known path", () => {
       const middleware = new AuthenticationMiddleware({
         apiKey: "test",
         oauth: {
@@ -171,7 +171,23 @@ describe("AuthenticationMiddleware", () => {
       const response = middleware.getUnauthorizedResponse();
 
       expect(response.headers["WWW-Authenticate"]).toBe(
-        'Bearer resource_metadata="https://example.com//.well-known/oauth-protected-resource", error="invalid_token", error_description="Unauthorized: Invalid or missing API key"',
+        'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource", error="invalid_token", error_description="Unauthorized: Invalid or missing API key"',
+      );
+    });
+
+    it("should insert the RFC 9728 well-known path before resource path and query components", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com/api/mcp?tenant=one",
+          },
+        },
+      });
+      const response = middleware.getUnauthorizedResponse();
+
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'resource_metadata="https://example.com/.well-known/oauth-protected-resource/api/mcp?tenant=one"',
       );
     });
 
@@ -413,6 +429,21 @@ describe("AuthenticationMiddleware", () => {
       );
       expect(response.headers["WWW-Authenticate"]).toContain(
         'resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+      );
+    });
+
+    it("should insert the well-known path before the resource path in scope challenges", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com/api/mcp",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(["read"]);
+
+      expect(response.headers["WWW-Authenticate"]).toContain(
+        'resource_metadata="https://example.com/.well-known/oauth-protected-resource/api/mcp"',
       );
     });
 

@@ -26,7 +26,11 @@ import https from "https";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
-import { AuthConfig, AuthenticationMiddleware } from "./authentication.js";
+import {
+  AuthConfig,
+  AuthenticationMiddleware,
+  getProtectedResourceMetadataUrl,
+} from "./authentication.js";
 import { InMemoryEventStore } from "./InMemoryEventStore.js";
 
 const DEFAULT_KEEP_ALIVE_TIMEOUT = 300_000;
@@ -429,7 +433,7 @@ const getWWWAuthenticateHeader = (
   // Add resource_metadata if configured
   if (oauth?.protectedResource?.resource) {
     params.push(
-      `resource_metadata="${oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`,
+      `resource_metadata="${getProtectedResourceMetadataUrl(oauth.protectedResource.resource)}"`,
     );
   }
 

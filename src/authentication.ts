@@ -16,6 +16,15 @@ export interface AuthConfig {
   };
 }
 
+export const getProtectedResourceMetadataUrl = (resource: string): string => {
+  const metadataUrl = new URL(resource);
+  const resourcePath = metadataUrl.pathname === "/" ? "" : metadataUrl.pathname;
+
+  metadataUrl.pathname = `/.well-known/oauth-protected-resource${resourcePath}`;
+
+  return metadataUrl.toString();
+};
+
 export class AuthenticationMiddleware {
   constructor(private config: AuthConfig = {}) {}
 
@@ -34,7 +43,7 @@ export class AuthenticationMiddleware {
         "Bearer",
         'error="insufficient_scope"',
         `scope="${requiredScopes.join(" ")}"`,
-        `resource_metadata="${this.config.oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`,
+        `resource_metadata="${getProtectedResourceMetadataUrl(this.config.oauth.protectedResource.resource)}"`,
       ];
 
       if (errorDescription) {
@@ -86,7 +95,7 @@ export class AuthenticationMiddleware {
     // Add resource_metadata if configured
     if (this.config.oauth?.protectedResource?.resource) {
       params.push(
-        `resource_metadata="${this.config.oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`,
+        `resource_metadata="${getProtectedResourceMetadataUrl(this.config.oauth.protectedResource.resource)}"`,
       );
     }
 
