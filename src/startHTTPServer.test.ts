@@ -2335,6 +2335,50 @@ it("includes WWW-Authenticate header in 401 response with OAuth config", async (
   await httpServer.close();
 });
 
+it("inserts the RFC 9728 well-known path before a configured resource path", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      throw new Error("Invalid JWT token");
+    },
+    oauth: {
+      protectedResource: {
+        resource: "https://example.com/api/mcp",
+      },
+    },
+    port,
+    stateless: true,
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0.0" },
+          protocolVersion: "2024-11-05",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("WWW-Authenticate")).toContain(
+      'resource_metadata="https://example.com/.well-known/oauth-protected-resource/api/mcp"',
+    );
+  } finally {
+    await httpServer.close();
+  }
+});
+
 it("includes WWW-Authenticate header when authenticate callback fails with OAuth", async () => {
   const port = await getRandomPort();
 
