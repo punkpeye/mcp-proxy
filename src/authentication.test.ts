@@ -191,6 +191,26 @@ describe("AuthenticationMiddleware", () => {
       );
     });
 
+    it("should fall back instead of throwing when the resource is not a valid URL", () => {
+      const middleware = new AuthenticationMiddleware({
+        apiKey: "test",
+        oauth: {
+          protectedResource: {
+            resource: "example.com/api/mcp",
+          },
+        },
+      });
+
+      // A misconfigured resource must not reject out of the request listener -
+      // that kills the process on every unauthenticated request.
+      expect(() => middleware.getUnauthorizedResponse()).not.toThrow();
+      expect(
+        middleware.getUnauthorizedResponse().headers["WWW-Authenticate"],
+      ).toContain(
+        'resource_metadata="example.com/api/mcp/.well-known/oauth-protected-resource"',
+      );
+    });
+
     it("should include minimal WWW-Authenticate header when OAuth config is empty object", () => {
       const middleware = new AuthenticationMiddleware({
         apiKey: "test",
