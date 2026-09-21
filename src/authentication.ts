@@ -16,6 +16,31 @@ export interface AuthConfig {
   };
 }
 
+// RFC 9728 section 3.1 puts the well-known segment between the host and the
+// path, not after it, so a resource mounted below the origin root advertises
+// its own metadata document rather than the root one.
+//
+// `resource` is operator-supplied and never validated, and this runs while
+// building 401/403 responses - letting `new URL` throw here would reject from
+// the request listener and take the process down. An unparseable value falls
+// back to the pre-RFC concatenation: still wrong, but wrong the way it already
+// was, instead of fatal.
+export const getProtectedResourceMetadataUrl = (resource: string): string => {
+  let metadataUrl: URL;
+
+  try {
+    metadataUrl = new URL(resource);
+  } catch {
+    return `${resource}/.well-known/oauth-protected-resource`;
+  }
+
+  const resourcePath = metadataUrl.pathname === "/" ? "" : metadataUrl.pathname;
+
+  metadataUrl.pathname = `/.well-known/oauth-protected-resource${resourcePath}`;
+
+  return metadataUrl.toString();
+};
+
 export class AuthenticationMiddleware {
   constructor(private config: AuthConfig = {}) {}
 
@@ -34,7 +59,7 @@ export class AuthenticationMiddleware {
         "Bearer",
         'error="insufficient_scope"',
         `scope="${requiredScopes.join(" ")}"`,
-        `resource_metadata="${this.config.oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`,
+        `resource_metadata="${getProtectedResourceMetadataUrl(this.config.oauth.protectedResource.resource)}"`,
       ];
 
       if (errorDescription) {
@@ -86,7 +111,7 @@ export class AuthenticationMiddleware {
     // Add resource_metadata if configured
     if (this.config.oauth?.protectedResource?.resource) {
       params.push(
-        `resource_metadata="${this.config.oauth.protectedResource.resource}/.well-known/oauth-protected-resource"`,
+        `resource_metadata="${getProtectedResourceMetadataUrl(this.config.oauth.protectedResource.resource)}"`,
       );
     }
 
