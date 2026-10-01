@@ -150,6 +150,10 @@ npx mcp-proxy -- python -u -m your_package.mcp_server
 
 stdio servers should also reserve stdout for protocol messages — send diagnostics to stderr, and use `--debug` for proxy-side logs.
 
+### macOS privacy prompts
+
+When mcp-proxy runs under launchd (or anywhere without a parent app), macOS attributes privacy decisions to the bare interpreter, so the prompt reads "node would like to access…". Approving it grants that permission to **every** `node` process on the machine. If `node` came from Homebrew, the grant is also keyed to the versioned Cellar path, so it silently disappears at the next `node` upgrade, and until a new decision exists, access to the protected location can hang with no prompt. To give the server its own identity, run it from a small purpose-named `.app` wrapper (a compiled stub that spawns `node … mcp-proxy …` as a child, so the stub stays the responsible process), or add `AssociatedBundleIdentifiers` to its LaunchAgent pointing at such an app. Don't grant permissions to `node` itself.
+
 ### Public Tunnel
 
 Expose a local server to the public internet — useful for testing webhooks, sharing a dev server, or remote access.
