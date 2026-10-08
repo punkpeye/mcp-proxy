@@ -28,6 +28,7 @@ import {
   acquireListenSubscriptions,
   getUpstreamBridge,
 } from "../upstreamNotifications.js";
+import { watchUpstreamExit } from "../watchUpstreamExit.js";
 
 util.inspect.defaultOptions.depth = 8;
 
@@ -264,7 +265,7 @@ const connect = async (client: Client, connectionTimeout: number) => {
   await client.connect(transport, { timeout: connectionTimeout });
 };
 
-const proxy = async () => {
+const proxy = async ({ onUpstreamExit }: { onUpstreamExit: () => void }) => {
   const client = new Client(
     {
       name: "mcp-proxy",
@@ -279,6 +280,17 @@ const proxy = async () => {
   );
 
   await connect(client, argv.connectionTimeout);
+
+  // The one upstream client serves every session and is never reconnected, so
+  // an upstream that exits leaves the proxy answering "Not connected" forever
+  // (#112). Report it unless the proxy is closing the client itself.
+  let closing = false;
+
+  watchUpstreamExit({
+    client,
+    isClosing: () => closing,
+    onExit: onUpstreamExit,
+  });
 
   console.info("starting server on port %d", argv.port);
 
@@ -354,6 +366,8 @@ const proxy = async () => {
 
   return {
     close: async () => {
+      closing = true;
+
       await server.close();
 
       // Tear the upstream subscription stream down before the client, so a
@@ -375,12 +389,39 @@ const proxy = async () => {
 
 const main = async () => {
   try {
-    const server = await proxy();
+    // Filled in once the server is up; the upstream can exit before that.
+    const shutdown: { run?: () => void } = {};
+    let upstreamExited = false;
 
-    createGracefulShutdown({
+    const server = await proxy({
+      onUpstreamExit: () => {
+        console.error(
+          "[mcp-proxy] the upstream server exited; shutting down so a supervisor can restart the proxy",
+        );
+
+        upstreamExited = true;
+        process.exitCode = 1;
+
+        setTimeout(() => {
+          process.exit(1);
+        }, argv.gracefulShutdownTimeout).unref();
+
+        // The SDK rejects the requests still in flight on the same close; let
+        // those errors reach their downstream clients before the server stops.
+        setTimeout(() => {
+          shutdown.run?.();
+        }, 100);
+      },
+    });
+
+    shutdown.run = createGracefulShutdown({
       server,
       timeout: argv.gracefulShutdownTimeout,
     });
+
+    if (upstreamExited) {
+      shutdown.run();
+    }
   } catch (error) {
     console.error("could not start the proxy", error);
 
