@@ -1280,6 +1280,22 @@ const reapIdleSessions = async <T>(
   }
 };
 
+/**
+ * A stateless request owns its `Server` and transport for exactly one exchange,
+ * and the SDK never closes a stateless transport on its own. Closing it once the
+ * response is done is what runs the transport's `onclose`, and so `onClose`.
+ */
+const closeWhenResponseEnds = (
+  transport: NodeStreamableHTTPServerTransport,
+  res: http.ServerResponse,
+) => {
+  res.once("close", () => {
+    transport.close().catch((error: unknown) => {
+      console.error("[mcp-proxy] error closing stateless transport", error);
+    });
+  });
+};
+
 const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
   authenticate,
@@ -1516,6 +1532,10 @@ const handleStreamRequest = async <T extends ServerLike>({
           throw error;
         }
 
+        if (stateless) {
+          closeWhenResponseEnds(transport, res);
+        }
+
         await transport.handleRequest(req, res, body);
 
         return true;
@@ -1529,6 +1549,21 @@ const handleStreamRequest = async <T extends ServerLike>({
           },
           sessionIdGenerator: undefined,
         });
+
+        // Same exactly-once teardown as the initialize branch above: nothing
+        // else ever closes this per-request server, so without it `onClose`
+        // never fires and whatever `createServer` registered stays resident.
+        let isCleaningUp = false;
+
+        transport.onclose = async () => {
+          if (isCleaningUp) {
+            return;
+          }
+
+          isCleaningUp = true;
+
+          await cleanupServer(server, onClose);
+        };
 
         try {
           server = await createServer(req);
@@ -1545,9 +1580,16 @@ const handleStreamRequest = async <T extends ServerLike>({
             await onConnect(server);
           }
         } catch (error) {
-          await cleanupServer(server, onClose);
+          if (!isCleaningUp) {
+            isCleaningUp = true;
+
+            await cleanupServer(server, onClose);
+          }
+
           throw error;
         }
+
+        closeWhenResponseEnds(transport, res);
 
         await transport.handleRequest(req, res, body);
 
