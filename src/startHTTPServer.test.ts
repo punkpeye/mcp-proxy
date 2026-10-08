@@ -1886,6 +1886,39 @@ it("includes Authorization in CORS allowed headers", async () => {
   await httpServer.close();
 });
 
+it("allows DELETE in the default CORS methods so a browser can end its session", async () => {
+  const port = await getRandomPort();
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      const mcpServer = new Server(
+        { name: "test", version: "1.0.0" },
+        { capabilities: {} },
+      );
+      return mcpServer;
+    },
+    port,
+  });
+
+  // A Streamable HTTP client terminates its session with DELETE; a browser
+  // preflights that request and drops it unless the method is allowed.
+  const response = await fetch(`http://localhost:${port}/mcp`, {
+    headers: {
+      "Access-Control-Request-Headers": "mcp-session-id",
+      "Access-Control-Request-Method": "DELETE",
+      Origin: "https://example.com",
+    },
+    method: "OPTIONS",
+  });
+
+  expect(response.status).toBe(204);
+  expect(response.headers.get("Access-Control-Allow-Methods")).toContain(
+    "DELETE",
+  );
+
+  await httpServer.close();
+});
+
 // Tests for FastMCP-style authentication with { authenticated: false } pattern
 
 it("returns 401 when authenticate callback returns { authenticated: false } in stateless mode", async () => {
