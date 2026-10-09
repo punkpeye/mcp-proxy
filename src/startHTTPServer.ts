@@ -2087,7 +2087,19 @@ export const startHTTPServer = async <T extends ServerLike>({
       res.writeHead(400).end("Bad Request");
       return;
     }
+    // The legacy SSE transport tells its client to POST to `/messages`. That
+    // request belongs to the protocol handler as much as the endpoints do, but
+    // only when it names a session this server holds - a `/messages` route of
+    // the consumer's own keeps working.
+    const isLegacySSEMessage =
+      req.method === "POST" &&
+      requestUrl.pathname === "/messages" &&
+      Object.hasOwn(
+        activeSSETransports,
+        requestUrl.searchParams.get("sessionId") ?? "",
+      );
     const isMcpEndpoint =
+      isLegacySSEMessage ||
       (sseEndpoint && requestUrl.pathname === sseEndpoint) ||
       (streamEndpoint && requestUrl.pathname === streamEndpoint);
 
