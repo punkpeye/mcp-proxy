@@ -1814,7 +1814,7 @@ const handleSSERequest = async <T extends ServerLike>({
     let closed = false;
     let isCleaningUp = false;
 
-    res.on("close", async () => {
+    const handleResponseClose = async () => {
       closed = true;
 
       // Prevent recursive cleanup
@@ -1826,7 +1826,9 @@ const handleSSERequest = async <T extends ServerLike>({
       await cleanupServer(server, onClose);
 
       delete activeTransports[transport.sessionId];
-    });
+    };
+
+    res.on("close", handleResponseClose);
 
     try {
       await server.connect(transport);
@@ -1860,6 +1862,14 @@ const handleSSERequest = async <T extends ServerLike>({
           res.end();
         }
       }
+    }
+
+    // `createServer` is awaited above, so the client can be gone before the
+    // listener exists - `close` has then already fired and never will again.
+    // Left alone the session sits in `activeTransports` and keeps whatever
+    // `createServer` registered for the life of the process.
+    if (res.closed && !isCleaningUp) {
+      await handleResponseClose();
     }
 
     return true;
