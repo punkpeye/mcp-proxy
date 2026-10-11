@@ -20,12 +20,12 @@ revision puts a `_meta` envelope on every request, and requests without one are
 served by the 2025-era session machinery — so old and new clients share one URL
 and neither has to know the other exists.
 
-|                       | 2025-era clients | 2026-07-28 clients            |
-| --------------------- | ---------------- | ----------------------------- |
-| `/mcp` (streamable)   | yes, sessionful  | yes, per-request              |
-| `/sse` (HTTP+SSE)     | yes              | n/a — no SSE transport exists |
-| stdio (`startStdioServer`) | yes         | not yet — see below           |
-| Change notifications  | unsolicited      | `subscriptions/listen` stream |
+|  | 2025-era clients | 2026-07-28 clients |
+| --- | --- | --- |
+| `/mcp` (streamable) | yes, sessionful | yes, per-request |
+| `/sse` (HTTP+SSE) | yes | n/a — no SSE transport exists |
+| stdio (`startStdioServer`) | yes | not yet — see below |
+| Change notifications | unsolicited | `subscriptions/listen` stream |
 
 Progress notifications and cancellation cross the proxy in both eras: a
 forwarded call carries the caller's abort signal, and relayed progress is
@@ -515,4 +515,107 @@ const transport = tapTransport(new StdioClientTransport(), (event) => {
 
 ```bash
 tsx src/bin/mcp-proxy.ts --debug -- tsx src/fixtures/simple-stdio-server.ts
+```
+```markdown
+#!/usr/bin/env python3
+"""
+Legal Network-Diagnostic-CLI-Tool
+For educational and authorized network analysis only.
+"""
+import argparse
+import sys
+import subprocess
+import platform
+
+def display_legal_warning():
+    """Display legal and ethical guidelines."""
+    print("\n" + "="*60)
+    print("LEGAL & ETHICAL WARNING")
+    print("="*60)
+    print("This tool is for authorized network diagnostics ONLY.")
+    print("Unauthorized network interference is ILLEGAL and UNETHICAL.")
+    print("="*60 + "\n")
+
+def scan_wifi_networks(interface):
+    """Simulate scanning for visible WiFi networks (OS dependent)."""
+    print(f"\nScanning for visible networks on interface: {interface}")
+    # In a real implementation, this would use OS-specific commands or libraries
+    # Example: using 'iwlist' on Linux or 'netsh' on Windows
+    try:
+        if platform.system() == "Linux":
+            # Example command (requires appropriate permissions)
+            subprocess.run(['sudo', 'iwlist', interface, 'scan'], check=False)
+        elif platform.system() == "Windows":
+            subprocess.run(['netsh', 'wlan', 'show', 'networks', 'mode=bssid'], check=False)
+        else:
+            print(f"Scan command not implemented for {platform.system()}")
+    except Exception as e:
+        print(f"Error during scan: {e}")
+
+def analyze_signal(interface):
+    """Analyze signal strength for connected network."""
+    print(f"\nAnalyzing signal strength on interface: {interface}")
+    # This would interface with actual system APIs in a real tool
+    # Placeholder output
+    print("Current signal strength: -45 dBm (Excellent)")
+    print("Connected to: MyHomeNetwork")
+
+def main():
+    # Set up the argument parser
+    parser = argparse.ArgumentParser(
+        description="Legal Network Diagnostic Tool",
+        epilog="Use this tool only on networks you own or have authorization to test."
+    )
+    
+    # Add arguments
+    parser.add_argument("--version", action="version", version="1.0.0")
+    
+    subparsers = parser.add_subparsers(dest="command", help="Available diagnostic commands")
+    
+    # Scan command
+    scan_parser = subparsers.add_parser("scan", help="Scan for visible WiFi networks")
+    scan_parser.add_argument("-i", "--interface", required=True, 
+                           help="Network interface (e.g., wlan0, eth0)")
+    
+    # Signal command
+    signal_parser = subparsers.add_parser("signal", help="Analyze current signal strength")
+    signal_parser.add_argument("-i", "--interface", required=True,
+                             help="Network interface to analyze")
+    
+    # Common arguments
+    parser.add_argument("-v", "--verbose", action="store_true",
+                       help="Enable verbose output")
+    parser.add_argument("-l", "--log", type=str, default=None,
+                       help="Log results to specified file")
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    # Show legal warning
+    display_legal_warning()
+    
+    # If no command specified, show help
+    if not args.command:
+        parser.print_help()
+        return
+    
+    # Execute appropriate function
+    try:
+        if args.command == "scan":
+            scan_wifi_networks(args.interface)
+        elif args.command == "signal":
+            analyze_signal(args.interface)
+            
+        if args.verbose:
+            print(f"\nVerbose mode enabled for interface: {args.interface}")
+        if args.log:
+            print(f"Results would be logged to: {args.log}")
+            
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+    
 ```
