@@ -149,8 +149,7 @@ const argv = await yargs(hideBin(process.argv))
       type: "boolean",
     },
     sseEndpoint: {
-      default: "/sse",
-      describe: "The SSE endpoint to listen on",
+      describe: "The SSE endpoint to listen on (default: /sse)",
       type: "string",
     },
     sslCa: {
@@ -172,8 +171,7 @@ const argv = await yargs(hideBin(process.argv))
       type: "boolean",
     },
     streamEndpoint: {
-      default: "/mcp",
-      describe: "The stream endpoint to listen on",
+      describe: "The stream endpoint to listen on (default: /mcp)",
       type: "string",
     },
     tunnel: {
@@ -315,10 +313,14 @@ const proxy = async () => {
       }),
     port: argv.port,
     sessionIdleTimeout: argv.sessionIdleTimeout,
+    // --endpoint applies only with --server; without it both transports would
+    // share one path. --sseEndpoint and --streamEndpoint have no yargs default,
+    // which would always win over --endpoint here; startHTTPServer falls back
+    // to /sse and /mcp.
     sseEndpoint:
       argv.server && argv.server !== "sse"
         ? null
-        : (argv.sseEndpoint ?? argv.endpoint),
+        : (argv.sseEndpoint ?? (argv.server ? argv.endpoint : undefined)),
     sslCa: argv.sslCa,
     sslCert: argv.sslCert,
     sslKey: argv.sslKey,
@@ -326,7 +328,7 @@ const proxy = async () => {
     streamEndpoint:
       argv.server && argv.server !== "stream"
         ? null
-        : (argv.streamEndpoint ?? argv.endpoint),
+        : (argv.streamEndpoint ?? (argv.server ? argv.endpoint : undefined)),
   });
 
   // A 2026-07-28 client receives change notifications only on a
