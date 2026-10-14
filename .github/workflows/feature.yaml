@@ -17,6 +17,7 @@ jobs:
       matrix:
         node:
           - 22
+          - 24
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
