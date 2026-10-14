@@ -2097,9 +2097,15 @@ export const startHTTPServer = async <T extends ServerLike>({
   stateless?: boolean;
   streamEndpoint?: null | string;
 }): Promise<SSEServer> => {
-  const activeSSETransports: Record<string, SSEServerTransport> = {};
+  // Both registries are keyed by session ids the client sends, so neither may
+  // inherit from `Object.prototype`. An id such as `__proto__` or `constructor`
+  // would otherwise resolve to a built-in instead of missing, and the stream
+  // tracking that runs before `authenticate` would write onto it.
+  const activeSSETransports: Record<string, SSEServerTransport> =
+    Object.create(null);
 
-  const activeStreamTransports: Record<string, StreamSession<T>> = {};
+  const activeStreamTransports: Record<string, StreamSession<T>> =
+    Object.create(null);
 
   const authMiddleware = new AuthenticationMiddleware({ apiKey, oauth });
 
