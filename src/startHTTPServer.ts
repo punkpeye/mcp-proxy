@@ -1289,11 +1289,22 @@ const closeWhenResponseEnds = (
   transport: NodeStreamableHTTPServerTransport,
   res: http.ServerResponse,
 ) => {
-  res.once("close", () => {
+  const close = () => {
     transport.close().catch((error: unknown) => {
       console.error("[mcp-proxy] error closing stateless transport", error);
     });
-  });
+  };
+
+  // `createServer` is awaited before this runs, so the client can already be
+  // gone - `close` has then fired and never will again, which would leave this
+  // server resident for the life of the process.
+  if (res.closed) {
+    close();
+
+    return;
+  }
+
+  res.once("close", close);
 };
 
 const handleStreamRequest = async <T extends ServerLike>({
