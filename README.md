@@ -216,7 +216,7 @@ const transport = new StreamableHTTPClientTransport(
 CORS is enabled by default with:
 
 - **Origin**: `*` (allow all origins)
-- **Methods**: `GET, POST, OPTIONS`
+- **Methods**: `GET, POST, DELETE, OPTIONS`
 - **Headers**: `Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, Mcp-Method, Mcp-Name`
 - **Credentials**: `true`
 - **Exposed Headers**: `Mcp-Session-Id`
@@ -245,7 +245,7 @@ import { startHTTPServer, CorsOptions } from "mcp-proxy";
 const cors: CorsOptions = {
   // A list, or a function for dynamic validation
   origin: ["https://app.example.com"],
-  methods: ["GET", "POST", "OPTIONS"],
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
 
   // "*" allows any header — the usual fix for browser preflight failures.
   // Listing headers instead REPLACES the defaults, so restate the protocol's

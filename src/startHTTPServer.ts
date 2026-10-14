@@ -800,7 +800,7 @@ const applyCorsHeaders = (
     allowedHeaders: DEFAULT_ALLOWED_HEADERS.join(", "),
     credentials: true,
     exposedHeaders: ["Mcp-Session-Id"],
-    methods: ["GET", "POST", "OPTIONS"],
+    methods: ["GET", "POST", "DELETE", "OPTIONS"],
     origin: "*",
   };
 
