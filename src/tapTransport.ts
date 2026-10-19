@@ -59,22 +59,22 @@ export const tapTransport = (
     return originalOnError?.(error);
   };
 
-  transport.onmessage = async (message: JSONRPCMessage) => {
+  transport.onmessage = async (message, extra) => {
     eventHandler({
       message,
       type: "onmessage",
     });
 
-    return originalOnMessage?.(message);
+    return originalOnMessage?.(message, extra);
   };
 
-  transport.send = async (message: JSONRPCMessage) => {
+  transport.send = async (message, options) => {
     eventHandler({
       message,
       type: "send",
     });
 
-    return originalSend?.(message);
+    return originalSend?.(message, options);
   };
 
   transport.start = async () => {
