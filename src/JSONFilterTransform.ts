@@ -44,7 +44,7 @@ export class JSONFilterTransform extends Transform {
     // Handle any remaining data in buffer
     const json = extractJson(this.buffer);
     if (json !== null) {
-      callback(null, Buffer.from(json));
+      callback(null, Buffer.from(json + "\n"));
     } else {
       callback(null, null);
     }
