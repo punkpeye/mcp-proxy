@@ -309,6 +309,70 @@ describe("InMemoryEventStore", () => {
     expect(replayed).toHaveLength(2);
   });
 
+  it.each(["replay-stream", "other-stream"])(
+    "does not skip retained events when %s evicts the cursor during replay",
+    async (writerStreamId) => {
+      const store = new InMemoryEventStore({ maxEvents: 3 });
+      const streamId = "replay-stream";
+      const messages: JSONRPCMessage[] = [1, 2, 3, 4].map((id) => ({
+        id,
+        jsonrpc: "2.0",
+        method: "step",
+      }));
+      const eventIds: string[] = [];
+      for (const message of messages.slice(0, 3)) {
+        eventIds.push(await store.storeEvent(streamId, message));
+      }
+      const replayed: JSONRPCMessage[] = [];
+      const returnedStreamId = await store.replayEventsAfter(eventIds[0], {
+        send: async (eventId, message) => {
+          replayed.push(message);
+          if (eventId === eventIds[1]) {
+            await store.storeEvent(writerStreamId, messages[3]);
+          }
+        },
+      });
+
+      expect(returnedStreamId).toBe(streamId);
+      expect(replayed).toEqual(
+        writerStreamId === streamId ? messages.slice(1) : messages.slice(1, 3),
+      );
+      expect(await store.getStreamIdForEventId(eventIds[2])).toBe(streamId);
+      expect(store.size).toBe(3);
+    },
+  );
+
+  it("continues replay when eviction removes and recreates the stream index", async () => {
+    const store = new InMemoryEventStore({ maxEvents: 3 });
+    const streamId = "replay-stream";
+    const messages: JSONRPCMessage[] = [1, 2, 3, 4].map((id) => ({
+      id,
+      jsonrpc: "2.0",
+      method: "step",
+    }));
+    const eventIds: string[] = [];
+    for (const message of messages.slice(0, 3)) {
+      eventIds.push(await store.storeEvent(streamId, message));
+    }
+    const replayed: JSONRPCMessage[] = [];
+    const returnedStreamId = await store.replayEventsAfter(eventIds[0], {
+      send: async (eventId, message) => {
+        replayed.push(message);
+        if (eventId === eventIds[1]) {
+          for (const otherMessage of messages.slice(0, 3)) {
+            await store.storeEvent("other-stream", otherMessage);
+          }
+          await store.storeEvent(streamId, messages[3]);
+        }
+      },
+    });
+
+    expect(returnedStreamId).toBe(streamId);
+    expect(replayed).toEqual([messages[1], messages[3]]);
+    expect(await store.getStreamIdForEventId(eventIds[2])).toBeUndefined();
+    expect(store.size).toBe(3);
+  });
+
   it("caps total retained events across all streams, not per stream", async () => {
     const store = new InMemoryEventStore({ maxEvents: 4 });
 
