@@ -115,6 +115,33 @@ export const startStdioServer = async ({
       serverCapabilities,
     });
 
+    // A client created here has no other owner after the stdio server closes.
+    // Caller-supplied clients keep their existing lifetime policy.
+    if (!initStreamClient) {
+      let upstreamClose: Promise<void> | undefined;
+      const closeUpstream = () => (upstreamClose ??= streamClient.close());
+      const previousOnClose = stdioServer.onclose;
+      const originalClose = stdioServer.close.bind(stdioServer);
+
+      stdioServer.onclose = () => {
+        try {
+          previousOnClose?.();
+        } finally {
+          void closeUpstream().catch((error: unknown) => {
+            console.error("[mcp-proxy] error closing upstream client", error);
+          });
+        }
+      };
+      stdioServer.close = async () => {
+        try {
+          await originalClose();
+        } catch (error) {
+          await closeUpstream().catch(() => {});
+          throw error;
+        }
+        await closeUpstream();
+      };
+    }
     // A bare `connect(new StdioServerTransport())`, which binds the connection to
     // the 2025 era at `initialize`. Serving 2026-07-28 here needs `serveStdio`,
     // and that entry wants a factory it can call more than once - it builds a

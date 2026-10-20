@@ -1,7 +1,6 @@
-import type { Client } from "@modelcontextprotocol/client";
-import type { Server } from "@modelcontextprotocol/server";
-
-import { describe, expect, it, vi } from "vitest";
+import { Client } from "@modelcontextprotocol/client";
+import { Server } from "@modelcontextprotocol/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { proxyServer } from "./proxyServer.js";
 import { ServerType, startStdioServer } from "./startStdioServer.js";
@@ -69,5 +68,103 @@ describe("startStdioServer startup cleanup", () => {
     ).rejects.toBe(startupError);
 
     expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+// The integration regression exercises the actual SSE and stdio transports.
+// These controlled close promises isolate ownership and callback semantics.
+describe("startStdioServer owned upstream cleanup", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const setup = async (close: () => Promise<void>, customClient = false) => {
+    vi.spyOn(Client.prototype, "connect").mockResolvedValue(undefined);
+    vi.spyOn(Client.prototype, "getServerVersion").mockReturnValue({
+      name: "upstream",
+      version: "1",
+    });
+    vi.spyOn(Client.prototype, "getServerCapabilities").mockReturnValue({});
+    const closeClient = vi
+      .spyOn(Client.prototype, "close")
+      .mockImplementation(close);
+    const server = new Server(
+      { name: "stdio", version: "1" },
+      { capabilities: {} },
+    );
+    const onclose = vi.fn();
+    server.onclose = onclose;
+    vi.spyOn(server, "connect").mockResolvedValue(undefined);
+    vi.spyOn(server, "close").mockImplementation(async () => {
+      server.onclose?.();
+    });
+    await startStdioServer({
+      initStdioServer: async () => server,
+      ...(customClient
+        ? {
+            initStreamClient: async () =>
+              new Client({ name: "custom", version: "1" }),
+          }
+        : {}),
+      serverType: ServerType.SSE,
+      url: "http://localhost/sse",
+    });
+    return { closeClient, onclose, server };
+  };
+
+  it("awaits one upstream close across repeated closes and preserves the callback", async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const { closeClient, onclose, server } = await setup(() => pending);
+    let settled = false;
+    const closing = server.close().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(onclose).toHaveBeenCalledOnce();
+    expect(closeClient).toHaveBeenCalledOnce();
+    finish();
+    await closing;
+    await server.close();
+    expect(closeClient).toHaveBeenCalledOnce();
+  });
+
+  it("observes callback cleanup failures and propagates them from explicit close", async () => {
+    const failure = new Error("upstream close failed");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { closeClient, server } = await setup(async () => {
+      throw failure;
+    });
+    server.onclose?.();
+    await Promise.resolve();
+    expect(logged).toHaveBeenCalledWith(
+      "[mcp-proxy] error closing upstream client",
+      failure,
+    );
+    await expect(server.close()).rejects.toBe(failure);
+    expect(closeClient).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a downstream close failure when upstream cleanup also fails", async () => {
+    const primary = new Error("downstream close failed");
+    const secondary = new Error("upstream close failed");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { closeClient, onclose, server } = await setup(async () => {
+      throw secondary;
+    });
+    onclose.mockImplementation(() => {
+      throw primary;
+    });
+    await expect(server.close()).rejects.toBe(primary);
+    expect(closeClient).toHaveBeenCalledOnce();
+  });
+  it("leaves caller-supplied clients open on ordinary stdio shutdown", async () => {
+    const { closeClient, onclose, server } = await setup(async () => {}, true);
+    await server.close();
+    expect(onclose).toHaveBeenCalledOnce();
+    expect(closeClient).not.toHaveBeenCalled();
   });
 });
