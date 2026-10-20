@@ -107,6 +107,7 @@ export const startStdioServer = async ({
       ? await initStdioServer()
       : new Server(serverVersion, {
           capabilities: serverCapabilities,
+          instructions: streamClient.getInstructions(),
         });
 
     await proxyServer({

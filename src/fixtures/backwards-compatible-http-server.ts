@@ -40,7 +40,10 @@ const NOTIFICATION_TOOL = {
 const createServer = () => {
   const server = new Server(
     { name: "backwards-compatible-server", version: "1.0.0" },
-    { capabilities: { logging: {}, tools: {} } },
+    {
+      capabilities: { logging: {}, tools: {} },
+      instructions: "Use start-notification-stream to receive periodic notifications.",
+    },
   );
 
   server.setRequestHandler("tools/list", async () => ({
