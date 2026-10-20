@@ -1,3 +1,4 @@
+import { extractWWWAuthenticateParams } from "@modelcontextprotocol/client";
 import { IncomingMessage } from "http";
 import { describe, expect, it } from "vitest";
 
@@ -418,6 +419,35 @@ describe("AuthenticationMiddleware", () => {
   });
 
   describe("getScopeChallengeResponse", () => {
+    it.each([
+      { description: undefined, scopes: ["read", "write"] },
+      { description: "Additional access required", scopes: ["admin"] },
+    ])(
+      "produces a scope challenge readable by the SDK: %j",
+      ({ description, scopes }) => {
+        const middleware = new AuthenticationMiddleware({
+          oauth: { protectedResource: { resource: "https://example.com/mcp" } },
+        });
+        const challenge = middleware.getScopeChallengeResponse(
+          scopes,
+          description,
+        );
+        const response = new Response(challenge.body, {
+          headers: challenge.headers,
+          status: challenge.statusCode,
+        });
+
+        expect(extractWWWAuthenticateParams(response)).toEqual({
+          error: "insufficient_scope",
+          errorDescription: description,
+          resourceMetadataUrl: new URL(
+            "https://example.com/.well-known/oauth-protected-resource/mcp",
+          ),
+          scope: scopes.join(" "),
+        });
+      },
+    );
+
     it("should return 403 status code", () => {
       const middleware = new AuthenticationMiddleware({
         oauth: {

@@ -56,7 +56,6 @@ export class AuthenticationMiddleware {
     // Build WWW-Authenticate header with all required parameters
     if (this.config.oauth?.protectedResource?.resource) {
       const parts = [
-        "Bearer",
         'error="insufficient_scope"',
         `scope="${requiredScopes.join(" ")}"`,
         `resource_metadata="${getProtectedResourceMetadataUrl(this.config.oauth.protectedResource.resource)}"`,
@@ -68,7 +67,7 @@ export class AuthenticationMiddleware {
         parts.push(`error_description="${escaped}"`);
       }
 
-      headers["WWW-Authenticate"] = parts.join(", ");
+      headers["WWW-Authenticate"] = `Bearer ${parts.join(", ")}`;
     }
 
     return {
