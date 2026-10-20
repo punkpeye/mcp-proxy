@@ -497,6 +497,10 @@ Options:
 - `upstreamProtocol`: Which protocol revision to speak upstream — `"legacy"` (default, the 2025 `initialize` handshake), `"auto"` (probe with `server/discover`, fall back to the handshake), or `"modern"` (require 2026-07-28). See [Protocol revisions](#protocol-revisions). Note that the stdio connection this serves is 2025-era regardless.
 - `initStdioServer` / `initStreamClient`: Bring your own `Server` / `Client` instance (optional)
 
+Closing the returned server also closes the upstream client created by
+`startStdioServer`. A client supplied by `initStreamClient` remains caller-owned
+during ordinary shutdown.
+
 #### `tapTransport`
 
 Taps into a transport and logs events.
