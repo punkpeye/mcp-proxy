@@ -1,3 +1,4 @@
+import { ReadBuffer } from "@modelcontextprotocol/client";
 import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { describe, expect, it, vi } from "vitest";
@@ -5,6 +6,54 @@ import { describe, expect, it, vi } from "vitest";
 import { JSONFilterTransform } from "./JSONFilterTransform.js";
 
 describe("JSONFilterTransform", () => {
+  it.each(["", "\n", "\r\n"])(
+    "delivers the final JSON-RPC message to ReadBuffer with terminator %j",
+    async (terminator) => {
+      const message = { id: 1, jsonrpc: "2.0", result: { ok: true } };
+      const readBuffer = new ReadBuffer();
+      await pipeline(
+        Readable.from([JSON.stringify(message) + terminator]),
+        new JSONFilterTransform(),
+        new Writable({
+          write(chunk, _encoding, callback) {
+            readBuffer.append(chunk);
+            callback();
+          },
+        }),
+      );
+
+      expect(readBuffer.readMessage()).toEqual(message);
+      expect(readBuffer.readMessage()).toBeNull();
+    },
+  );
+
+  it.each(['{"jsonrpc":"2.0",', '{}'])(
+    "passes invalid trailing data %j through to SDK validation",
+    async (input) => {
+      const readBuffer = new ReadBuffer();
+      const chunks: Buffer[] = [];
+      await pipeline(
+        Readable.from([input]),
+        new JSONFilterTransform(),
+        new Writable({
+          write(chunk, _encoding, callback) {
+            chunks.push(chunk);
+            readBuffer.append(chunk);
+            callback();
+          },
+        }),
+      );
+
+      expect(Buffer.concat(chunks).toString()).toBe(input + "\n");
+      if (input === "{}") {
+        expect(() => readBuffer.readMessage()).toThrow();
+      } else {
+        // The SDK skips malformed JSON, but propagates schema validation errors.
+        expect(readBuffer.readMessage()).toBeNull();
+      }
+    },
+  );
+
   it("filters out non-JSON lines and passes through JSON lines", async () => {
     const input = [
       '{"type": "request", "id": 1}',
