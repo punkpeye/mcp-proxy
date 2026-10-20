@@ -88,7 +88,7 @@ export class InMemoryEventStore implements EventStore {
       return "";
     }
 
-    const eventIdsForStream = this.eventIdsByStream.get(streamId);
+    let eventIdsForStream = this.eventIdsByStream.get(streamId);
 
     if (!eventIdsForStream) {
       return "";
@@ -100,19 +100,26 @@ export class InMemoryEventStore implements EventStore {
       return "";
     }
 
-    for (
-      let index = lastEventIndex + 1;
-      index < eventIdsForStream.length;
-      index++
-    ) {
+    let index = lastEventIndex + 1;
+    while (index < eventIdsForStream.length) {
       const eventId = eventIdsForStream[index];
       const storedEvent = this.events.get(eventId);
 
       if (!storedEvent) {
+        index++;
         continue;
       }
 
       await send(eventId, storedEvent.message);
+
+      // Sending may append events or evict earlier IDs, shifting the index.
+      // Refresh it even if eviction removed and recreated the stream's array.
+      eventIdsForStream = this.eventIdsByStream.get(streamId) ?? [];
+      index =
+        eventIdsForStream[index] === eventId
+          ? index + 1
+          : eventIdsForStream.indexOf(eventId) + 1;
+      // If the sent event was evicted, FIFO guarantees all retained IDs follow it.
     }
 
     return streamId;
