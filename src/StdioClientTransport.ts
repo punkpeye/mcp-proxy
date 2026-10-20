@@ -264,7 +264,11 @@ export class StdioClientTransport implements Transport {
         }
       });
 
-      jsonFilterTransform.on("error", reportError);
+      jsonFilterTransform.on("error", (error) => {
+        // A failed filter is destroyed and cannot deliver subsequent messages.
+        reportError(error);
+        this.close().catch(() => {});
+      });
 
       // `pipe()` does not forward a source error to its destination, so the
       // listener above never sees one. Without this, an error on the child's
