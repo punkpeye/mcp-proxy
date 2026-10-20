@@ -1,4 +1,7 @@
-import { JSONRPCMessage } from "@modelcontextprotocol/client";
+import {
+  JSONRPCMessage,
+  STDIO_DEFAULT_MAX_BUFFER_SIZE,
+} from "@modelcontextprotocol/client";
 import { ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it } from "vitest";
@@ -304,3 +307,41 @@ it("resolves send() and leaves no listeners behind once a buffered write drains"
 
   await transport.close();
 }, 10_000);
+
+it("closes the connection when the JSON filter exceeds its buffer cap", async () => {
+  const transport = new StdioClientTransport({
+    args: [
+      "-e",
+      `process.stdout.write(Buffer.alloc(${2 * STDIO_DEFAULT_MAX_BUFFER_SIZE + 1}, 120)); setInterval(() => {}, 1000);`,
+    ],
+    command: "node",
+    env: process.env as Record<string, string>,
+    stderr: "ignore",
+  });
+  let closeCount = 0;
+  transport.onclose = () => {
+    closeCount++;
+  };
+  const reported = new Promise<Error>((resolve) => {
+    transport.onerror = resolve;
+  });
+  let exited: Promise<void> | undefined;
+
+  try {
+    await transport.start();
+    exited = new Promise((resolve) => {
+      childOf(transport).once("close", () => resolve());
+    });
+    const error = await reported;
+    expect(error.message).toMatch(
+      /JSONFilterTransform buffer exceeded maximum size/,
+    );
+    expect(closeCount).toBe(1);
+    expect(transport.pid).toBeNull();
+    await exited;
+    expect(closeCount).toBe(1);
+  } finally {
+    await transport.close();
+    await exited;
+  }
+}, 15_000);
