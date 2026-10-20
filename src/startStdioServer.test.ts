@@ -130,7 +130,12 @@ describe("startStdioServer.test.ts", () => {
 
     expect(notificationCount).toEqual(2);
 
+    const instructions = stdioClient.getInstructions();
     await stdioClient.close();
+
+    expect(instructions).toBe(
+      "Use start-notification-stream to receive periodic notifications.",
+    );
   }, 30000);
 
   it("proxies messages between stdio and stream able servers", async () => {
@@ -214,6 +219,11 @@ describe("startStdioServer.test.ts", () => {
 
     expect(notificationCount).toEqual(2);
 
+    const instructions = stdioClient.getInstructions();
     await stdioClient.close();
+
+    expect(instructions).toBe(
+      "Use start-notification-stream to receive periodic notifications.",
+    );
   }, 30000);
 });

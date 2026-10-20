@@ -3,16 +3,16 @@ import type {
   SSEClientTransportOptions,
   StreamableHTTPClientTransportOptions,
 } from "@modelcontextprotocol/client";
-import type { ServerCapabilities } from "@modelcontextprotocol/server";
+import type { Server, ServerCapabilities } from "@modelcontextprotocol/server";
 
 import {
   Client,
   SSEClientTransport,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import { Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
+import { createProxyServer } from "./createProxyServer.js";
 import { proxyServer } from "./proxyServer.js";
 
 export enum ServerType {
@@ -95,19 +95,12 @@ export const startStdioServer = async ({
   await streamClient.connect(transport);
 
   try {
-    const serverVersion = streamClient.getServerVersion() as {
-      name: string;
-      version: string;
-    };
-
     const serverCapabilities =
       streamClient.getServerCapabilities() as ServerCapabilities;
 
     const stdioServer = initStdioServer
       ? await initStdioServer()
-      : new Server(serverVersion, {
-          capabilities: serverCapabilities,
-        });
+      : createProxyServer(streamClient).server;
 
     await proxyServer({
       client: streamClient,
