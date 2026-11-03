@@ -365,6 +365,7 @@ Options:
 - `onConnect`: Callback when a server instance is created (optional). Fires once per session on the 2025-era legs and **once per request** on the 2026-07-28 leg, which builds a fresh instance per request.
 - `onClose`: Callback when a server instance is torn down (optional). Same per-era unit as `onConnect`; keep it cheap and idempotent. A rejection is logged and does not stop the rest of teardown.
 - `onUnhandledRequest`: Callback for unhandled HTTP requests (optional)
+- `beforeDispatch`: Lets the server answer a request with its own HTTP response before `mcp-proxy` hands it to the transport (optional). See [Answering before dispatch](#answering-before-dispatch).
 
 Returns `{ close, notify }`. See [Change notifications](#change-notifications)
 for what `notify` is for.
@@ -474,6 +475,45 @@ text routinely push a single tool call past a megabyte. Raise it if your clients
 legitimately send more, or set `0` (CLI) / `false` (library) to disable it,
 which restores unbounded buffering and is only safe behind a gateway that
 already limits body size.
+
+##### Answering before dispatch
+
+Once a message reaches the transport, the SDK owns the HTTP response: a tool
+runs after that, and whatever it throws comes back as a JSON-RPC error on a
+`200`. So a tool cannot send MCP's `403 insufficient_scope` challenge, which
+tells the client to re-authorize with more scopes.
+
+`beforeDispatch` runs first. It is offered every message POSTed to the
+streamable HTTP endpoint or the SSE endpoint's `POST /messages` once
+`authenticate` has passed, along with that request's `authResult` and the
+`server` that would handle it. A batch is offered one message at a time. Return
+a `Response` to answer the request with it - none of its messages is then
+dispatched - or nothing to let the message through. For the scope
+challenge, throw an `InsufficientScopeError` and `mcp-proxy` builds it from
+`oauth`:
+
+```ts
+await startHTTPServer({
+  authenticate,
+  beforeDispatch: ({ authResult, message }) => {
+    const missing = missingScopes(authResult, message); // your own check
+
+    if (missing.length > 0) {
+      throw {
+        data: { error: "insufficient_scope", requiredScopes: missing },
+        name: "InsufficientScopeError",
+      };
+    }
+  },
+  createServer,
+  oauth: { protectedResource: { resource: "https://example.com/mcp" } },
+  port: 8080,
+});
+```
+
+The client gets a `403` with `WWW-Authenticate: Bearer error="insufficient_scope",
+scope="…", resource_metadata="…"`. A thrown `Response` is sent as is; anything
+else thrown is answered with a `500`.
 
 #### `startStdioServer`
 

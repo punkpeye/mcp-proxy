@@ -515,17 +515,19 @@ const sendSessionUnauthorizedResponse = ({
   );
 };
 
-// Helper function to detect scope challenge errors
-const isScopeChallengeError = (
-  error: unknown,
-): error is {
+type ScopeChallengeError = {
   data: {
     error: string;
     errorDescription?: string;
     requiredScopes: string[];
   };
   name: string;
-} => {
+};
+
+// Helper function to detect scope challenge errors
+const isScopeChallengeError = (
+  error: unknown,
+): error is ScopeChallengeError => {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -535,8 +537,37 @@ const isScopeChallengeError = (
     typeof error.data === "object" &&
     error.data !== null &&
     "error" in error.data &&
-    error.data.error === "insufficient_scope"
+    error.data.error === "insufficient_scope" &&
+    // Read unchecked when the challenge is built, so an error claimed here
+    // without it would fail there instead.
+    "requiredScopes" in error.data &&
+    Array.isArray(error.data.requiredScopes)
   );
+};
+
+/**
+ * Answers an `InsufficientScopeError` with MCP's 403 `insufficient_scope`
+ * challenge, which tells the client which scopes to re-authorize for.
+ */
+const sendScopeChallenge = ({
+  authMiddleware,
+  error,
+  requestId,
+  res,
+}: {
+  readonly authMiddleware: AuthenticationMiddleware;
+  readonly error: ScopeChallengeError;
+  readonly requestId: unknown;
+  readonly res: http.ServerResponse;
+}): void => {
+  const response = authMiddleware.getScopeChallengeResponse(
+    error.data.requiredScopes,
+    error.data.errorDescription,
+    requestId,
+  );
+
+  res.writeHead(response.statusCode, response.headers);
+  res.end(response.body);
 };
 
 // Helper function to handle Response errors and send appropriate HTTP response
@@ -779,6 +810,150 @@ const updateServerAuth = (server: unknown, authResult: unknown): void => {
   }
 };
 
+/**
+ * Called with each JSON-RPC message a client POSTs, once `authenticate` has
+ * passed and before mcp-proxy hands the message to the transport. Return (or
+ * resolve with) a `Response` to answer the HTTP request with it instead - none
+ * of that request's messages is then dispatched. Return nothing to let the
+ * message through.
+ *
+ * This is the last point at which the server can still choose the status a
+ * request is answered with. Once a message is dispatched the SDK owns the
+ * response: it runs the handler afterwards and turns anything it throws into a
+ * JSON-RPC error on a 200, whose headers an SSE-mode response has already
+ * sent. MCP's 403 `insufficient_scope` challenge has to come from here, not
+ * from the tool.
+ *
+ * A thrown `Response` is sent as if it had been returned. A thrown
+ * `InsufficientScopeError` - `{ name: "InsufficientScopeError", data: { error:
+ * "insufficient_scope", requiredScopes } }` - is answered with that challenge,
+ * built from `oauth`. Anything else thrown is answered with a 500.
+ */
+export type BeforeDispatchHandler<T> = (context: {
+  /** What `authenticate` resolved to for this request, if it is configured. */
+  readonly authResult: unknown;
+  /**
+   * One message as the client sent it, not yet validated. A batch is offered
+   * one message at a time.
+   */
+  readonly message: unknown;
+  readonly request: http.IncomingMessage;
+  /** The instance the message would be dispatched to. */
+  readonly server: T;
+}) => Promise<Response | void> | Response | void;
+
+/**
+ * Answers a `beforeDispatch` throw: a `Response` verbatim, an
+ * `InsufficientScopeError` as the scope challenge, anything else as a 500.
+ */
+const sendBeforeDispatchError = async ({
+  authMiddleware,
+  error,
+  message,
+  res,
+}: {
+  readonly authMiddleware: AuthenticationMiddleware;
+  readonly error: unknown;
+  readonly message: unknown;
+  readonly res: http.ServerResponse;
+}): Promise<void> => {
+  try {
+    if (await handleResponseError(error, res)) {
+      return;
+    }
+
+    if (isScopeChallengeError(error)) {
+      sendScopeChallenge({
+        authMiddleware,
+        error,
+        requestId: getRequestId(message),
+        res,
+      });
+
+      return;
+    }
+  } catch (answerError) {
+    // A `Response` whose body was already read, say. Falls through to the 500.
+    console.error(
+      "[mcp-proxy] error answering from beforeDispatch",
+      answerError,
+    );
+  }
+
+  console.error("[mcp-proxy] error in beforeDispatch", error);
+
+  if (res.headersSent) {
+    res.end();
+
+    return;
+  }
+
+  res.setHeader("Content-Type", "application/json");
+
+  res
+    .writeHead(500)
+    .end(createJsonRpcErrorResponse(-32603, "Internal Server Error"));
+};
+
+/**
+ * Offers each message a POST carries to `beforeDispatch`, and answers the
+ * request when that asks to. Resolves to whether it did - if so, none of the
+ * request's messages may be dispatched.
+ *
+ * Never rejects. A caller that built a server for this request relies on the
+ * result to know whether it has to release that server itself.
+ */
+const answerBeforeDispatch = async <T>({
+  authMiddleware,
+  authResult,
+  beforeDispatch,
+  body,
+  req,
+  res,
+  server,
+}: {
+  readonly authMiddleware: AuthenticationMiddleware;
+  readonly authResult: unknown;
+  readonly beforeDispatch?: BeforeDispatchHandler<T>;
+  readonly body: unknown;
+  readonly req: http.IncomingMessage;
+  readonly res: http.ServerResponse;
+  readonly server: T;
+}): Promise<boolean> => {
+  if (!beforeDispatch) {
+    return false;
+  }
+
+  // A batch is offered a message at a time, so that a call cannot get past a
+  // check written for single messages by arriving inside an array. Only an
+  // object can be a message; the transport rejects anything else.
+  const messages = (Array.isArray(body) ? body : [body]).filter(
+    (message) => typeof message === "object" && message !== null,
+  );
+
+  for (const message of messages) {
+    try {
+      const answer = await beforeDispatch({
+        authResult,
+        message,
+        request: req,
+        server,
+      });
+
+      // Written by the same code that passes a thrown `Response` through.
+      if (await handleResponseError(answer, res)) {
+        return true;
+      }
+    } catch (error) {
+      await sendBeforeDispatchError({ authMiddleware, error, message, res });
+
+      return true;
+    }
+  }
+
+  return false;
+};
+
 // Helper function to clean up server resources
 const cleanupServer = async <T extends ServerLike>(
   server: T,
@@ -975,6 +1150,11 @@ type ModernLeg<T> = {
     body: unknown,
   ) => Promise<void>;
   notify: ServerNotifier;
+  /**
+   * Ends an instance's exchange. `handle` does this itself; call it only for an
+   * instance that never reached `handle`.
+   */
+  release: (instance: ModernInstance<T>) => Promise<void>;
 };
 
 /**
@@ -1164,6 +1344,16 @@ const createModernLeg = <T extends ServerLike>({
     fetch: (request, options) => handler.fetch(request, options),
   });
 
+  const release = async (instance: ModernInstance<T>) => {
+    try {
+      await instance.server.close();
+    } catch (error) {
+      console.error("[mcp-proxy] error closing modern instance", error);
+    }
+
+    instance.teardown();
+  };
+
   return {
     close: () => handler.close(),
     createInstance,
@@ -1173,16 +1363,11 @@ const createModernLeg = <T extends ServerLike>({
       } finally {
         // Resolves only once the response - including a streamed one - is
         // fully written, so this is the end of the exchange, not the middle.
-        try {
-          await instance.server.close();
-        } catch (error) {
-          console.error("[mcp-proxy] error closing modern instance", error);
-        }
-
-        instance.teardown();
+        await release(instance);
       }
     },
     notify: handler.notify,
+    release,
   };
 };
 
@@ -1320,6 +1505,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   activeTransports,
   authenticate,
   authMiddleware,
+  beforeDispatch,
   createServer,
   enableJsonResponse,
   endpoint,
@@ -1337,6 +1523,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   activeTransports: Record<string, StreamSession<T>>;
   authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
   authMiddleware: AuthenticationMiddleware;
+  beforeDispatch?: BeforeDispatchHandler<T>;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
   endpoint: string;
@@ -1444,6 +1631,22 @@ const handleStreamRequest = async <T extends ServerLike>({
             return true;
           }
 
+          if (
+            await answerBeforeDispatch({
+              authMiddleware,
+              authResult,
+              beforeDispatch,
+              body,
+              req,
+              res,
+              server: instance.server,
+            })
+          ) {
+            await modernHandler.release(instance);
+
+            return true;
+          }
+
           await modernHandler.handle(instance, req, res, body);
 
           return true;
@@ -1465,6 +1668,20 @@ const handleStreamRequest = async <T extends ServerLike>({
 
         // Update session's auth context with fresh authentication result
         updateServerAuth(server, authResult);
+
+        if (
+          await answerBeforeDispatch({
+            authMiddleware,
+            authResult,
+            beforeDispatch,
+            body,
+            req,
+            res,
+            server,
+          })
+        ) {
+          return true;
+        }
       } else if (!sessionId && isInitializeRequest(body)) {
         // Create a new transport for the session
         transport = new NodeStreamableHTTPServerTransport({
@@ -1542,6 +1759,28 @@ const handleStreamRequest = async <T extends ServerLike>({
           throw error;
         }
 
+        if (
+          await answerBeforeDispatch({
+            authMiddleware,
+            authResult,
+            beforeDispatch,
+            body,
+            req,
+            res,
+            server,
+          })
+        ) {
+          // Never initialized, so never registered: nothing else would ever
+          // release this server.
+          if (!isCleaningUp) {
+            isCleaningUp = true;
+
+            await cleanupServer(server, onClose);
+          }
+
+          return true;
+        }
+
         if (stateless) {
           closeWhenResponseEnds(transport, res);
         }
@@ -1599,6 +1838,26 @@ const handleStreamRequest = async <T extends ServerLike>({
           throw error;
         }
 
+        if (
+          await answerBeforeDispatch({
+            authMiddleware,
+            authResult,
+            beforeDispatch,
+            body,
+            req,
+            res,
+            server,
+          })
+        ) {
+          if (!isCleaningUp) {
+            isCleaningUp = true;
+
+            await cleanupServer(server, onClose);
+          }
+
+          return true;
+        }
+
         closeWhenResponseEnds(transport, res);
 
         await transport.handleRequest(req, res, body);
@@ -1643,14 +1902,13 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       // Check for scope challenge errors
       if (isScopeChallengeError(error)) {
-        const response = authMiddleware.getScopeChallengeResponse(
-          error.data.requiredScopes,
-          error.data.errorDescription,
-          (body as { id?: unknown })?.id,
-        );
+        sendScopeChallenge({
+          authMiddleware,
+          error,
+          requestId: (body as { id?: unknown })?.id,
+          res,
+        });
 
-        res.writeHead(response.statusCode, response.headers);
-        res.end(response.body);
         return true;
       }
 
@@ -1837,6 +2095,8 @@ type SSESession<T> = {
 const handleSSERequest = async <T extends ServerLike>({
   activeTransports,
   authenticate,
+  authMiddleware,
+  beforeDispatch,
   createServer,
   endpoint,
   maxBodySize,
@@ -1848,6 +2108,8 @@ const handleSSERequest = async <T extends ServerLike>({
 }: {
   activeTransports: Record<string, SSESession<T>>;
   authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
+  authMiddleware: AuthenticationMiddleware;
+  beforeDispatch?: BeforeDispatchHandler<T>;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   endpoint: string;
   maxBodySize?: MaxBodySizeOption;
@@ -2017,6 +2279,20 @@ const handleSSERequest = async <T extends ServerLike>({
     try {
       updateServerAuth(session.server, authentication.authResult);
 
+      if (
+        await answerBeforeDispatch({
+          authMiddleware,
+          authResult: authentication.authResult,
+          beforeDispatch,
+          body,
+          req,
+          res,
+          server: session.server,
+        })
+      ) {
+        return true;
+      }
+
       await session.transport.handlePostMessage(req, res, body);
     } catch (error) {
       // The request listener passed to createServer is async and Node does not
@@ -2040,6 +2316,7 @@ const handleSSERequest = async <T extends ServerLike>({
 export const startHTTPServer = async <T extends ServerLike>({
   apiKey,
   authenticate,
+  beforeDispatch,
   cors,
   createServer,
   enableJsonResponse,
@@ -2065,6 +2342,14 @@ export const startHTTPServer = async <T extends ServerLike>({
 }: {
   apiKey?: string;
   authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
+  /**
+   * Lets the server answer a request with its own HTTP response before
+   * mcp-proxy hands it to the transport - how a server sends MCP's 403
+   * `insufficient_scope` challenge. Offered every message POSTed to the stream
+   * endpoint or the SSE endpoint's `POST /messages`, once `authenticate` has
+   * passed. See {@link BeforeDispatchHandler}.
+   */
+  beforeDispatch?: BeforeDispatchHandler<T>;
   cors?: boolean | CorsOptions;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   enableJsonResponse?: boolean;
@@ -2269,6 +2554,8 @@ export const startHTTPServer = async <T extends ServerLike>({
       (await handleSSERequest({
         activeTransports: activeSSETransports,
         authenticate,
+        authMiddleware,
+        beforeDispatch,
         createServer,
         endpoint: sseEndpoint,
         maxBodySize,
@@ -2288,6 +2575,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         activeTransports: activeStreamTransports,
         authenticate,
         authMiddleware,
+        beforeDispatch,
         createServer,
         enableJsonResponse,
         endpoint: streamEndpoint,

@@ -4,6 +4,7 @@ export type { InMemoryEventStoreOptions } from "./InMemoryEventStore.js";
 export { InMemoryEventStore } from "./InMemoryEventStore.js";
 export { proxyServer } from "./proxyServer.js";
 export type {
+  BeforeDispatchHandler,
   CorsOptions,
   EventStoreOption,
   ListenSubscriptionsHandler,
