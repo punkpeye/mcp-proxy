@@ -128,7 +128,7 @@ options:
 - `--sessionIdleTimeout`: How long in milliseconds a stateful stream session survives with no stream attached and no requests before it is closed (default: 1800000, 30 minutes). Set to `0` to keep every session until its client sends `DELETE`. See [Abandoned sessions](#abandoned-sessions).
 - `--eventStore`: Enable the resumability event store, letting clients replay missed messages after a reconnect (default: `true`). `--no-eventStore` disables it. See [Resumability and memory use](#resumability-and-memory-use).
 - `--eventStoreMaxEvents`: Maximum number of buffered events the resumability event store retains per session before it evicts the oldest (default: 1000). Ignored when `--no-eventStore` is set.
-- `--maxBodySize`: Maximum request body size in bytes accepted by the streamable HTTP endpoint; larger requests are answered with `413 Payload Too Large` (default: 10485760, 10 MiB). Set to `0` to disable the limit. See [Request body size](#request-body-size).
+- `--maxBodySize`: Maximum request body size in bytes accepted by the streamable HTTP endpoint and the SSE endpoint's `POST /messages`; larger requests are answered with `413 Payload Too Large` (default: 10485760, 10 MiB). Set to `0` to disable the limit. See [Request body size](#request-body-size).
 - `--debug`: Enable debug logging
 - `--shell`: Spawn the server via the user's shell
 - `--apiKey`: API key for authenticating requests (uses X-API-Key header)
@@ -355,7 +355,7 @@ Options:
 - `host`: Host to bind to (default: "::")
 - `keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000)
 - `sessionIdleTimeout`: How long in milliseconds a stateful stream session survives with no stream attached and no requests before it is closed (default: 1800000, 30 minutes). Pass `0` to keep every session until its client sends `DELETE`. See [Abandoned sessions](#abandoned-sessions).
-- `maxBodySize`: Caps how many bytes of a request body the streamable HTTP endpoint buffers; larger requests are answered with `413 Payload Too Large` (default: 10485760, 10 MiB). Pass `false` to disable the cap. See [Request body size](#request-body-size).
+- `maxBodySize`: Caps how many bytes of a request body the streamable HTTP endpoint and the SSE endpoint's `POST /messages` buffer; larger requests are answered with `413 Payload Too Large` (default: 10485760, 10 MiB). Pass `false` to disable the cap. See [Request body size](#request-body-size).
 - `sseEndpoint`: SSE endpoint path (default: "/sse", set to null to disable)
 - `streamEndpoint`: Streamable HTTP endpoint path (default: "/mcp", set to null to disable)
 - `stateless`: Enable stateless mode for HTTP streamable transport (default: false). Applies to the 2025-era leg; protocol revision 2026-07-28 is per-request by construction.
@@ -461,20 +461,19 @@ retains anything between requests.
 
 ##### Request body size
 
-The streamable HTTP endpoint buffers each request body before parsing it, so a
-slow-chunking client could otherwise grow the process's memory for as long as it
-kept sending. `mcp-proxy` caps that buffer at 10 MiB (`--maxBodySize` /
-`maxBodySize`). An oversized `Content-Length` is rejected before any body is
-read; a chunked body is cut off as soon as it exceeds the cap. Either way the
-answer is `413 Payload Too Large` with a JSON-RPC error body naming the limit,
-then the connection closes.
+The streamable HTTP endpoint and the SSE endpoint's `POST /messages` buffer each
+request body before parsing it, so a slow-chunking client could otherwise grow
+the process's memory for as long as it kept sending. `mcp-proxy` caps that
+buffer at 10 MiB (`--maxBodySize` / `maxBodySize`). An oversized
+`Content-Length` is rejected before any body is read; a chunked body is cut off
+as soon as it exceeds the cap. Either way the answer is `413 Payload Too Large`
+with a JSON-RPC error body naming the limit, then the connection closes.
 
 The default is deliberately generous — base64 images, documents and long pasted
 text routinely push a single tool call past a megabyte. Raise it if your clients
 legitimately send more, or set `0` (CLI) / `false` (library) to disable it,
 which restores unbounded buffering and is only safe behind a gateway that
-already limits body size. The cap does not apply to the SSE endpoint, whose
-`POST /messages` bodies are read by the MCP SDK rather than by `mcp-proxy`.
+already limits body size.
 
 #### `startStdioServer`
 

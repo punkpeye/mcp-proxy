@@ -112,7 +112,7 @@ const argv = await yargs(hideBin(process.argv))
     maxBodySize: {
       default: 10485760,
       describe:
-        "Maximum request body size in bytes accepted by the stream endpoint; larger requests are answered with 413 Payload Too Large. Bounds the memory a single request can consume (default: 10 MiB). Set to 0 to disable the limit",
+        "Maximum request body size in bytes accepted by the stream endpoint and the SSE message endpoint; larger requests are answered with 413 Payload Too Large. Bounds the memory a single request can consume (default: 10 MiB). Set to 0 to disable the limit",
       type: "number",
     },
     modern: {

@@ -221,10 +221,11 @@ export const DEFAULT_ALLOWED_HEADERS = [
 const DEFAULT_MAX_BODY_SIZE = 10_485_760; // 10 MiB
 
 /**
- * Caps how many bytes of a request body the stream endpoint buffers before it
- * gives up. `false` (or `0` from the CLI) disables the cap entirely, restoring
- * unbounded buffering - only do that behind a gateway that already limits body
- * size. Omitted/`undefined` uses `DEFAULT_MAX_BODY_SIZE`.
+ * Caps how many bytes of a request body the stream endpoint and the SSE
+ * endpoint's `POST /messages` buffer before giving up. `false` (or `0` from
+ * the CLI) disables the cap entirely, restoring unbounded buffering - only do
+ * that behind a gateway that already limits body size. Omitted/`undefined`
+ * uses `DEFAULT_MAX_BODY_SIZE`.
  */
 export type MaxBodySizeOption = false | number;
 
@@ -658,10 +659,10 @@ type AuthenticationOutcome =
  * Runs the consumer's `authenticate` callback, when there is one, and answers a
  * rejection itself: a thrown `Response` verbatim, anything else as a 401.
  *
- * The stream endpoint runs this before it looks a session up, on every verb.
- * That ordering is what lets a caller whose credentials pass but whose session
- * is gone be told so with a 404, while a caller whose credentials fail gets its
- * 401 challenge whether or not the session exists.
+ * Both endpoints run this before they look a session up or create one. That
+ * ordering is what lets a caller whose credentials pass but whose session is
+ * gone be told so (a 404 on the stream endpoint), while a caller whose
+ * credentials fail gets its 401 challenge whether or not the session exists.
  */
 const authenticateRequest = async ({
   authenticate,
@@ -756,6 +757,25 @@ const authenticateRequest = async ({
     );
 
     return { rejected: true };
+  }
+};
+
+/**
+ * Hands a request's `authenticate` result to the server that will handle it,
+ * when that server keeps an auth context (`updateAuth`, as FastMCP sessions
+ * do). This is what makes a long-lived session act on the credentials of each
+ * request rather than those of the request that opened it. `authResult` is the
+ * consumer's own value, not an SDK `AuthInfo`.
+ */
+const updateServerAuth = (server: unknown, authResult: unknown): void => {
+  if (
+    authResult &&
+    typeof server === "object" &&
+    server !== null &&
+    "updateAuth" in server &&
+    typeof (server as { updateAuth?: unknown }).updateAuth === "function"
+  ) {
+    (server as { updateAuth: (auth: unknown) => void }).updateAuth(authResult);
   }
 };
 
@@ -1099,19 +1119,8 @@ const createModernLeg = <T extends ServerLike>({
         }
       }
 
-      // Same convention the 2025-era leg uses for a session's auth context;
-      // `authResult` is the consumer's own value, not an SDK `AuthInfo`.
-      if (
-        authResult &&
-        typeof server === "object" &&
-        server !== null &&
-        "updateAuth" in server &&
-        typeof (server as { updateAuth?: unknown }).updateAuth === "function"
-      ) {
-        (server as { updateAuth: (auth: unknown) => void }).updateAuth(
-          authResult,
-        );
-      }
+      // Same convention the 2025-era legs use for a session's auth context.
+      updateServerAuth(server, authResult);
 
       if (onConnect) {
         await onConnect(server);
@@ -1455,17 +1464,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         // Already claimed above, before the first await.
 
         // Update session's auth context with fresh authentication result
-        if (
-          authResult &&
-          typeof server === "object" &&
-          server !== null &&
-          "updateAuth" in server &&
-          typeof (server as { updateAuth?: unknown }).updateAuth === "function"
-        ) {
-          (server as { updateAuth: (auth: unknown) => void }).updateAuth(
-            authResult,
-          );
-        }
+        updateServerAuth(server, authResult);
       } else if (!sessionId && isInitializeRequest(body)) {
         // Create a new transport for the session
         transport = new NodeStreamableHTTPServerTransport({
@@ -1825,18 +1824,34 @@ const handleStreamRequest = async <T extends ServerLike>({
   return false;
 };
 
+/**
+ * One legacy SSE session. The server is kept next to its transport because each
+ * `POST /messages` is authenticated on its own, and its auth result has to
+ * reach the server that will handle the message.
+ */
+type SSESession<T> = {
+  server: T;
+  transport: SSEServerTransport;
+};
+
 const handleSSERequest = async <T extends ServerLike>({
   activeTransports,
+  authenticate,
   createServer,
   endpoint,
+  maxBodySize,
+  oauth,
   onClose,
   onConnect,
   req,
   res,
 }: {
-  activeTransports: Record<string, SSEServerTransport>;
+  activeTransports: Record<string, SSESession<T>>;
+  authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   endpoint: string;
+  maxBodySize?: MaxBodySizeOption;
+  oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
   req: http.IncomingMessage;
@@ -1846,6 +1861,19 @@ const handleSSERequest = async <T extends ServerLike>({
     req.method === "GET" &&
     new URL(req.url!, "http://localhost").pathname === endpoint
   ) {
+    // Checked here rather than left to `createServer`, which need not check
+    // credentials at all - one that does not would hand a session to anyone.
+    const authentication = await authenticateRequest({
+      authenticate,
+      oauth,
+      req,
+      res,
+    });
+
+    if (authentication.rejected) {
+      return true;
+    }
+
     const transport = new SSEServerTransport("/messages", res);
 
     let server: T;
@@ -1862,7 +1890,7 @@ const handleSSERequest = async <T extends ServerLike>({
       return true;
     }
 
-    activeTransports[transport.sessionId] = transport;
+    activeTransports[transport.sessionId] = { server, transport };
 
     let closed = false;
     let isCleaningUp = false;
@@ -1939,22 +1967,57 @@ const handleSSERequest = async <T extends ServerLike>({
       return true;
     }
 
-    const activeTransport: SSEServerTransport | undefined =
-      activeTransports[sessionId];
+    // Read here rather than by the SDK, so that `maxBodySize` bounds this
+    // endpoint as it does the stream endpoint.
+    const bodyResult = await getBody(req, maxBodySize);
 
-    if (!activeTransport) {
+    if (bodyResult.tooLarge) {
+      sendPayloadTooLarge({ maxBodySize: bodyResult.limit, req, res });
+
+      return true;
+    }
+
+    const { body } = bodyResult;
+
+    // Every message is authenticated on its own, as on the stream endpoint.
+    // The session id is not a credential, and a token revoked or downgraded
+    // since the stream opened must stop working on the next message, not when
+    // the stream closes.
+    const authentication = await authenticateRequest({
+      authenticate,
+      body,
+      oauth,
+      req,
+      res,
+    });
+
+    if (authentication.rejected) {
+      return true;
+    }
+
+    // Looked up after the awaits above, during which the stream may have
+    // closed.
+    const session = activeTransports[sessionId];
+
+    if (!session) {
       res.writeHead(400).end("No active transport");
 
       return true;
     }
 
-    // `maxBodySize` deliberately does not reach here: the SDK reads and parses
-    // this body itself, so the proxy never buffers it and has nothing to cap.
-    // The SSE endpoint is therefore bounded by whatever limit the SDK applies,
-    // not by the stream endpoint's. Front this with a gateway limit if you need
-    // the two to match.
+    // Handed `null` (a body that would not parse), the SDK would try to read
+    // the body itself from a stream already drained; handed a string, it
+    // would decode it a second time.
+    if (typeof body !== "object" || body === null) {
+      res.writeHead(400).end("Invalid message");
+
+      return true;
+    }
+
     try {
-      await activeTransport.handlePostMessage(req, res);
+      updateServerAuth(session.server, authentication.authResult);
+
+      await session.transport.handlePostMessage(req, res, body);
     } catch (error) {
       // The request listener passed to createServer is async and Node does not
       // observe its returned promise. Settle failures here instead of letting
@@ -2024,13 +2087,12 @@ export const startHTTPServer = async <T extends ServerLike>({
   host?: string;
   keepAliveTimeout?: number;
   /**
-   * Caps how many bytes of a request body the stream endpoint buffers,
-   * bounding the memory a single request can consume. A request over the cap
-   * is answered with `413 Payload Too Large` and the connection is closed.
-   * Default: 10485760 (10 MiB). Pass `false` to disable the cap entirely
-   * (unbounded buffering - only safe behind a gateway that already limits body
-   * size). Does not apply to the SSE endpoint, whose POST bodies are read by
-   * the MCP SDK.
+   * Caps how many bytes of a request body the stream endpoint and the SSE
+   * endpoint's `POST /messages` buffer, bounding the memory a single request
+   * can consume. A request over the cap is answered with
+   * `413 Payload Too Large` and the connection is closed. Default: 10485760
+   * (10 MiB). Pass `false` to disable the cap entirely (unbounded buffering -
+   * only safe behind a gateway that already limits body size).
    */
   maxBodySize?: MaxBodySizeOption;
   /**
@@ -2101,7 +2163,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   // inherit from `Object.prototype`. An id such as `__proto__` or `constructor`
   // would otherwise resolve to a built-in instead of missing, and the stream
   // tracking that runs before `authenticate` would write onto it.
-  const activeSSETransports: Record<string, SSEServerTransport> =
+  const activeSSETransports: Record<string, SSESession<T>> =
     Object.create(null);
 
   const activeStreamTransports: Record<string, StreamSession<T>> =
@@ -2206,8 +2268,11 @@ export const startHTTPServer = async <T extends ServerLike>({
       sseEndpoint &&
       (await handleSSERequest({
         activeTransports: activeSSETransports,
+        authenticate,
         createServer,
         endpoint: sseEndpoint,
+        maxBodySize,
+        oauth,
         onClose,
         onConnect,
         req,
@@ -2367,7 +2432,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         clearInterval(sessionReaper);
       }
 
-      for (const transport of Object.values(activeSSETransports)) {
+      for (const { transport } of Object.values(activeSSETransports)) {
         await transport.close();
       }
 
