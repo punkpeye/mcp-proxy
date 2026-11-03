@@ -489,8 +489,7 @@ streamable HTTP endpoint or the SSE endpoint's `POST /messages` once
 `server` that would handle it. A batch is offered one message at a time. Return
 a `Response` to answer the request with it - none of its messages is then
 dispatched - or nothing to let the message through. For the scope
-challenge, throw an `InsufficientScopeError` and `mcp-proxy` builds it from
-`oauth`:
+challenge, throw an `InsufficientScopeError` and `mcp-proxy` builds it:
 
 ```ts
 await startHTTPServer({
@@ -512,8 +511,10 @@ await startHTTPServer({
 ```
 
 The client gets a `403` with `WWW-Authenticate: Bearer error="insufficient_scope",
-scope="…", resource_metadata="…"`. A thrown `Response` is sent as is; anything
-else thrown is answered with a `500`.
+scope="…", resource_metadata="…"`. `resource_metadata` comes from
+`oauth.protectedResource.resource` and is left out without it; `oauth.realm`
+adds `realm`. A thrown `Response` is sent as is; anything else thrown is
+answered with a `500`.
 
 #### `startStdioServer`
 

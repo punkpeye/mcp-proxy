@@ -49,26 +49,36 @@ export class AuthenticationMiddleware {
     errorDescription?: string,
     requestId?: unknown,
   ): { body: string; headers: Record<string, string>; statusCode: number } {
+    // RFC 6750 requires a challenge whenever a token is refused, and it is how
+    // the client learns which scopes to re-authorize for, so this is always
+    // built. OAuth config only enriches it with the optional auth-params.
+    const params: string[] = [];
+
+    if (this.config.oauth?.realm) {
+      params.push(`realm="${this.config.oauth.realm}"`);
+    }
+
+    params.push(
+      'error="insufficient_scope"',
+      `scope="${requiredScopes.join(" ")}"`,
+    );
+
+    if (this.config.oauth?.protectedResource?.resource) {
+      params.push(
+        `resource_metadata="${getProtectedResourceMetadataUrl(this.config.oauth.protectedResource.resource)}"`,
+      );
+    }
+
+    if (errorDescription) {
+      // Escape quotes in description
+      const escaped = errorDescription.replace(/"/g, '\\"');
+      params.push(`error_description="${escaped}"`);
+    }
+
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "WWW-Authenticate": `Bearer ${params.join(", ")}`,
     };
-
-    // Build WWW-Authenticate header with all required parameters
-    if (this.config.oauth?.protectedResource?.resource) {
-      const parts = [
-        'error="insufficient_scope"',
-        `scope="${requiredScopes.join(" ")}"`,
-        `resource_metadata="${getProtectedResourceMetadataUrl(this.config.oauth.protectedResource.resource)}"`,
-      ];
-
-      if (errorDescription) {
-        // Escape quotes in description
-        const escaped = errorDescription.replace(/"/g, '\\"');
-        parts.push(`error_description="${escaped}"`);
-      }
-
-      headers["WWW-Authenticate"] = `Bearer ${parts.join(", ")}`;
-    }
 
     return {
       body: JSON.stringify({

@@ -361,6 +361,48 @@ it("answers with the scope challenge built from oauth, naming the message that n
   expect(toolCalls).toEqual([]);
 });
 
+it("still challenges with the required scopes when oauth is not configured", async () => {
+  const port = await getRandomPort();
+  const toolCalls: string[] = [];
+
+  const httpServer = await startHTTPServer({
+    authenticate,
+    beforeDispatch: challengeScopes,
+    createServer: async () => createFileServer(toolCalls),
+    port,
+    stateless: true,
+  });
+
+  cleanups.push(() => httpServer.close());
+
+  const response = await postStream(port, callTool(1, "write"), {
+    Authorization: "Bearer read-token",
+  });
+
+  // All of the challenge but `resource_metadata`, which only oauth can supply.
+  expect(response.status).toBe(403);
+  expect(response.headers.get("www-authenticate")).toBe(
+    'Bearer error="insufficient_scope", scope="files:read files:write", error_description="This tool needs more scopes"',
+  );
+  expect(await response.json()).toMatchObject({ error: { code: -32001 } });
+
+  // Enough for the SDK client to know which scopes to re-authorize for.
+  const client = await connectClient(port, "legacy", "Bearer read-token");
+
+  const error = await client
+    .callTool({ arguments: {}, name: "write" })
+    .catch((error: unknown) => error);
+
+  expect(error).toBeInstanceOf(InsufficientScopeError);
+  expect(error).toMatchObject({
+    errorDescription: "This tool needs more scopes",
+    requiredScope: "files:read files:write",
+  });
+  expect((error as InsufficientScopeError).resourceMetadataUrl).toBeUndefined();
+
+  expect(toolCalls).toEqual([]);
+});
+
 for (const how of ["returned", "thrown"] as const) {
   it(`answers with a Response beforeDispatch has ${how}, verbatim, and hands it the request's context`, async () => {
     const port = await getRandomPort();

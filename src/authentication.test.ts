@@ -515,14 +515,16 @@ describe("AuthenticationMiddleware", () => {
       );
     });
 
-    it("should escape quotes in error_description", () => {
-      const middleware = new AuthenticationMiddleware({
-        oauth: {
-          protectedResource: {
-            resource: "https://example.com",
-          },
+    it.each([
+      { config: {}, name: "without OAuth config" },
+      {
+        config: {
+          oauth: { protectedResource: { resource: "https://example.com" } },
         },
-      });
+        name: "with OAuth config",
+      },
+    ])("should escape quotes in error_description $name", ({ config }) => {
+      const middleware = new AuthenticationMiddleware(config);
       const response = middleware.getScopeChallengeResponse(
         ["admin"],
         'Requires "admin" scope',
@@ -625,12 +627,86 @@ describe("AuthenticationMiddleware", () => {
       ]);
     });
 
-    it("should not include WWW-Authenticate header without OAuth config", () => {
-      const middleware = new AuthenticationMiddleware({});
-      const response = middleware.getScopeChallengeResponse(["admin"]);
+    it.each([
+      { config: {}, name: "without OAuth config" },
+      { config: { apiKey: "test" }, name: "with only an API key" },
+      { config: { oauth: {} }, name: "when OAuth config is empty object" },
+      {
+        config: { oauth: { protectedResource: {} } },
+        name: "when protectedResource is empty",
+      },
+    ])(
+      "should include WWW-Authenticate header without resource_metadata $name",
+      ({ config }) => {
+        const middleware = new AuthenticationMiddleware(config);
 
-      expect(response.headers["WWW-Authenticate"]).toBeUndefined();
-      expect(response.headers["Content-Type"]).toBe("application/json");
+        // RFC 6750 requires the challenge with or without OAuth config, and
+        // without it the client cannot tell which scopes to ask for.
+        expect(
+          middleware.getScopeChallengeResponse(["read", "write"]).headers,
+        ).toEqual({
+          "Content-Type": "application/json",
+          "WWW-Authenticate":
+            'Bearer error="insufficient_scope", scope="read write"',
+        });
+        expect(
+          middleware.getScopeChallengeResponse(
+            ["admin"],
+            "Admin access required",
+          ).headers["WWW-Authenticate"],
+        ).toBe(
+          'Bearer error="insufficient_scope", scope="admin", error_description="Admin access required"',
+        );
+      },
+    );
+
+    it("should add resource_metadata to the challenge when the protected resource is configured", () => {
+      const middleware = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+        },
+      });
+      const response = middleware.getScopeChallengeResponse(
+        ["read", "write"],
+        "Write access required",
+      );
+
+      expect(response.headers["WWW-Authenticate"]).toBe(
+        'Bearer error="insufficient_scope", scope="read write", resource_metadata="https://example.com/.well-known/oauth-protected-resource", error_description="Write access required"',
+      );
+    });
+
+    it("should add realm to the challenge when configured", () => {
+      const realmOnly = new AuthenticationMiddleware({
+        oauth: { realm: "my-realm" },
+      });
+
+      expect(
+        realmOnly.getScopeChallengeResponse(["admin"]).headers[
+          "WWW-Authenticate"
+        ],
+      ).toBe(
+        'Bearer realm="my-realm", error="insufficient_scope", scope="admin"',
+      );
+
+      const withResource = new AuthenticationMiddleware({
+        oauth: {
+          protectedResource: {
+            resource: "https://example.com",
+          },
+          realm: "my-realm",
+        },
+      });
+
+      expect(
+        withResource.getScopeChallengeResponse(["admin"]).headers[
+          "WWW-Authenticate"
+        ],
+      ).toBe(
+        'Bearer realm="my-realm", error="insufficient_scope", scope="admin", resource_metadata="https://example.com/.well-known/oauth-protected-resource"',
+      );
     });
 
     it("should return proper JSON-RPC 2.0 format", () => {

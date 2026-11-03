@@ -827,7 +827,8 @@ const updateServerAuth = (server: unknown, authResult: unknown): void => {
  * A thrown `Response` is sent as if it had been returned. A thrown
  * `InsufficientScopeError` - `{ name: "InsufficientScopeError", data: { error:
  * "insufficient_scope", requiredScopes } }` - is answered with that challenge,
- * built from `oauth`. Anything else thrown is answered with a 500.
+ * to which `oauth` adds `resource_metadata` and `realm` when configured.
+ * Anything else thrown is answered with a 500.
  */
 export type BeforeDispatchHandler<T> = (context: {
   /** What `authenticate` resolved to for this request, if it is configured. */
