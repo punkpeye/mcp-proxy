@@ -360,8 +360,11 @@ describe("authentication covers both legs", () => {
       headers: {
         Accept: "application/json, text/event-stream",
         "Content-Type": "application/json",
-        // Required on 2026-07-28 streamable HTTP POSTs (SEP-2243).
+        // Required on 2026-07-28 streamable HTTP POSTs (SEP-2243); the SDK
+        // rejects a body envelope whose version the header does not repeat.
         "Mcp-Method": "tools/list",
+        "MCP-Protocol-Version":
+          MODERN_ENVELOPE["io.modelcontextprotocol/protocolVersion"],
         ...headers,
       },
       method: "POST",
