@@ -3,12 +3,52 @@ import type {
   RequestOptions,
   ServerCapabilities,
   ServerContext,
+  StandardSchemaV1,
 } from "@modelcontextprotocol/server";
 
 import { Client } from "@modelcontextprotocol/client";
 import { Server } from "@modelcontextprotocol/server";
 
+import { EVENTS_EXTENSION } from "./eventsExtension.js";
 import { getUpstreamBridge } from "./upstreamNotifications.js";
+
+/**
+ * The Events methods that are plain request/response - webhook subscriptions
+ * and polling - which is all of the extension this proxy forwards.
+ *
+ * `events/stream` (push) is left out on purpose. Its events arrive as
+ * notifications tagged with the stream's request id, on the one upstream
+ * connection every caller shares, so serving it means routing each one back to
+ * the caller that opened the stream. Forwarded like the methods here, the
+ * stream would hang and deliver nothing.
+ */
+const EVENTS_METHODS = [
+  "events/list",
+  "events/poll",
+  "events/subscribe",
+  "events/unsubscribe",
+] as const;
+
+/**
+ * Accepts any JSON object and hands it back as it is.
+ *
+ * The extension's own shapes are deliberately not encoded here. The draft is
+ * still moving, and a schema naming today's fields would strip the ones a
+ * newer upstream adds - along with the difference between `null` and absent
+ * that `cursor` and `ttlMs` depend on. Validating a request is the upstream's
+ * job, and the error it answers a bad one with is the error its caller has to
+ * see anyway.
+ */
+const anyObject: StandardSchemaV1<Record<string, unknown>> = {
+  "~standard": {
+    validate: (value) =>
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? { value: value as Record<string, unknown> }
+        : { issues: [{ message: "Expected a JSON object" }] },
+    vendor: "mcp-proxy",
+    version: 1,
+  },
+};
 
 /**
  * The first revision of the 2026 era. Revisions are date-stamped, so ordering
@@ -266,5 +306,26 @@ export const proxyServer = async ({
     server.setRequestHandler("completion/complete", async (request, ctx) => {
       return client.complete(request.params, forwardOptions(ctx));
     });
+  }
+
+  // An empty settings object is support too - only an absent key is not.
+  if (serverCapabilities?.extensions?.[EVENTS_EXTENSION] !== undefined) {
+    for (const method of EVENTS_METHODS) {
+      // Params and results cross as they are (see `anyObject`). The SDK lifts
+      // the 2026-07-28 envelope off `_meta` before this runs, and the upstream
+      // client adds its own, so every other `_meta` key goes through intact -
+      // bar `progressToken`, which `forwardOptions` swaps for the client's own.
+      //
+      // Nothing about a subscription is kept here. The upstream POSTs webhooks
+      // straight to the caller's URL, and a subscription lasts as long as the
+      // upstream granted - so a downstream connection going away must not
+      // unsubscribe anything.
+      server.setRequestHandler(
+        method,
+        { params: anyObject, result: anyObject },
+        (params, ctx) =>
+          client.request({ method, params }, anyObject, forwardOptions(ctx)),
+      );
+    }
   }
 };

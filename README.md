@@ -78,12 +78,95 @@ rather than half-solved.
   downstream caller — so does any telemetry keyed on it.
 - **2026-07-28 over stdio.** `startStdioServer` serves 2025-era clients only;
   the HTTP side serves both.
+- **MCP Events push, and per-caller principals.** See
+  [MCP Events](#mcp-events-experimental).
 
 > [!NOTE]
 > The `/sse` endpoint uses the frozen `@modelcontextprotocol/server-legacy`
 > copy of the HTTP+SSE transport, which the v2 SDK removed. That transport is
 > deprecated as of `2026-07-28` with a twelve-month window; migrate clients to
 > the streamable HTTP endpoint.
+
+## MCP Events (experimental)
+
+MCP Proxy forwards the webhook and poll half of the Events extension
+([SEP-3415](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/3415),
+a draft, last checked against `b08e4f9`). This is experimental forwarding, not
+SEP-3415 compliance: anything the table does not list is not forwarded.
+
+| Method                              | Through the proxy                                     |
+| ----------------------------------- | ----------------------------------------------------- |
+| `events/list`                       | forwarded, pagination included                        |
+| `events/poll`                       | forwarded; cursors come back unchanged                |
+| `events/subscribe`                  | forwarded, to subscribe and to refresh                |
+| `events/unsubscribe`                | forwarded                                             |
+| `events/stream` (push)              | not forwarded: `-32601 Method not found`              |
+| `notifications/events/list_changed` | not delivered: `listChanged` is advertised as `false` |
+
+- **Only when the upstream offers it.** The four methods exist only if the
+  upstream advertises `capabilities.extensions["io.modelcontextprotocol/events"]`
+  (an empty `{}` counts). Otherwise they are `-32601 Method not found`, as
+  before.
+- **Passed through, not parsed.** Params and results cross as they are: `null`
+  stays distinct from absent (`cursor`, `ttlMs`), and unknown fields and
+  `_meta` survive. Errors keep their code, message and `data` for every code
+  SEP-3415 uses. `resultType` belongs to the protocol revision, so each
+  connection drops and re-stamps it, and a 2026-07-28 connection adds a
+  `serverInfo` entry to a result's `_meta` when it has none. Cancellation,
+  progress and `--requestTimeout` apply as to any forwarded call.
+- **Webhooks go straight to the caller.** The upstream POSTs to `delivery.url`
+  itself. The proxy never receives a webhook, creates or checks a secret,
+  stores a subscription or refreshes one, and a downstream connection closing
+  unsubscribes nothing. A subscription lasts as long as the upstream keeps it:
+  until its TTL lapses, someone calls `events/unsubscribe`, or the upstream
+  ends it.
+- **No push.** `events/stream` gets `-32601`, which SEP-3415 reads as "no
+  Events support at all", so a client that picks push fails instead of
+  falling back. The SEP's client guidance picks push over poll when no webhook
+  is configured, and the catalog is not rewritten, so any event type that
+  lists `"push"` invites it. Have clients use poll or webhook; event types that
+  offer only push cannot be consumed through the proxy.
+- **Upstream revision.** SEP-3415 is defined for `2026-07-28`, so a conformant
+  server advertises the extension on `server/discover` only. Run the proxy
+  with `--upstreamProtocol auto` (or `modern`). Under the default `legacy`
+  handshake the proxy sees the extension only if the server also puts it in
+  its `initialize` result, as some do. Downstream, both eras get the methods.
+- **`Mcp-Name`.** SEP-3415 requires it, set to `params.name`, on `events/poll`,
+  `events/subscribe` and `events/unsubscribe` over streamable HTTP. The SDK
+  client sets it; the proxy does not check it.
+- **Only `extensions` is relayed.** The pre-SEP top-level `capabilities.events`
+  that some clients still read is dropped when the SDK parses the upstream's
+  capabilities.
+- **Your own `Server`.** The CLI and `startStdioServer` advertise
+  `listChanged: false`. If you build the downstream `Server` yourself (for
+  `proxyServer`, or through `initStdioServer`), do the same.
+
+> [!WARNING]
+> **Every caller is the same principal upstream.** SEP-3415 keys a webhook
+> subscription on `(principal, delivery.url, name, arguments)`, where the
+> principal is whoever the upstream authenticated. The proxy has one upstream
+> connection (for the CLI, one process), so every downstream caller is that
+> process's own identity: its credentials, its environment.
+>
+> - Two callers that send the same `delivery.url`, `name` and `arguments`
+>   share one subscription, and either can refresh it, rotate its secret or
+>   delete it.
+> - The upstream caches a callback URL's verification per principal, so a URL
+>   one caller has verified is open to every other caller without a new
+>   challenge.
+> - stdio carries no MCP authentication, and SEP-3415 has a server refuse
+>   `events/subscribe` and `events/unsubscribe` without a principal
+>   (`Forbidden`). Through the CLI they work only if the server treats its own
+>   process identity as the principal.
+> - Webhooks are POSTed from wherever the upstream runs — for the CLI, the
+>   proxy's host. Anyone who can reach the proxy chooses those URLs, so make
+>   sure the server does the URL checks SEP-3415 requires before exposing the
+>   proxy.
+>
+> `--apiKey` and `authenticate` decide who reaches the proxy, not who the
+> upstream thinks is calling, and the proxy passes on no per-caller identity.
+> Isolating principals takes a separate upstream connection (process) per
+> principal, or a trusted delegation mechanism designed for it.
 
 ## Installation
 
