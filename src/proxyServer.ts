@@ -7,7 +7,7 @@ import type {
 } from "@modelcontextprotocol/server";
 
 import { Client } from "@modelcontextprotocol/client";
-import { Server } from "@modelcontextprotocol/server";
+import { ProtocolError, Server } from "@modelcontextprotocol/server";
 
 import { EVENTS_EXTENSION } from "./eventsExtension.js";
 import { getUpstreamBridge } from "./upstreamNotifications.js";
@@ -15,12 +15,6 @@ import { getUpstreamBridge } from "./upstreamNotifications.js";
 /**
  * The Events methods that are plain request/response - webhook subscriptions
  * and polling - which is all of the extension this proxy forwards.
- *
- * `events/stream` (push) is left out on purpose. Its events arrive as
- * notifications tagged with the stream's request id, on the one upstream
- * connection every caller shares, so serving it means routing each one back to
- * the caller that opened the stream. Forwarded like the methods here, the
- * stream would hang and deliver nothing.
  */
 const EVENTS_METHODS = [
   "events/list",
@@ -28,6 +22,12 @@ const EVENTS_METHODS = [
   "events/subscribe",
   "events/unsubscribe",
 ] as const;
+
+/**
+ * SEP-3415's `Unsupported` error code. Provisional, like every code the SEP
+ * defines, until the SEP is accepted.
+ */
+const UNSUPPORTED = -32026;
 
 /**
  * Accepts any JSON object and hands it back as it is.
@@ -327,5 +327,24 @@ export const proxyServer = async ({
           client.request({ method, params }, anyObject, forwardOptions(ctx)),
       );
     }
+
+    // Push is not forwarded. Its events arrive as notifications tagged with the
+    // stream's request id, on the one upstream connection every caller shares,
+    // so serving it means routing each one back to the caller that opened the
+    // stream; forwarded like the methods above, it would hang and deliver
+    // nothing. It is refused here as an unsupported delivery mode: a client
+    // reads "method not found" as "no Events at all", where this lets it fall
+    // back to poll or webhook.
+    server.setRequestHandler(
+      "events/stream",
+      { params: anyObject },
+      async () => {
+        throw new ProtocolError(
+          UNSUPPORTED,
+          "Push delivery is not available through mcp-proxy; use poll or webhook",
+          { feature: "deliveryMode", value: "push" },
+        );
+      },
+    );
   }
 };

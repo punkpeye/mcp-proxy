@@ -569,6 +569,7 @@ describe("capability gating", () => {
       for (const method of [
         "events/list",
         "events/poll",
+        "events/stream",
         "events/subscribe",
         "events/unsubscribe",
       ]) {
@@ -635,22 +636,25 @@ describe("capability gating", () => {
   }, 30000);
 
   for (const clientEra of ERAS) {
-    it(`leaves events/stream at method not found instead of forwarding it (${clientEra} client)`, async () => {
+    it(`refuses events/stream itself, as an unsupported delivery mode (${clientEra} client)`, async () => {
       const upstream = await createUpstream({ era: "modern" });
       const { port } = await startProxy(upstream);
       const client = await connect(port, clientEra);
 
-      expect(
-        await refusal(
-          client.request(
-            {
-              method: "events/stream",
-              params: { cursor: null, name: "incident.created" },
-            },
-            anyObject,
-          ),
+      // Not "method not found", which a client reads as no Events at all:
+      // this says only push is unavailable, so poll or webhook can take over.
+      await expect(
+        client.request(
+          {
+            method: "events/stream",
+            params: { cursor: null, name: "incident.created" },
+          },
+          anyObject,
         ),
-      ).toBe(-32601);
+      ).rejects.toMatchObject({
+        code: -32026,
+        data: { feature: "deliveryMode", value: "push" },
+      });
 
       expect(upstream.calls).toEqual([]);
     }, 30000);

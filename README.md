@@ -100,13 +100,13 @@ SEP-3415 compliance: anything the table does not list is not forwarded.
 | `events/poll`                       | forwarded; cursors come back unchanged                |
 | `events/subscribe`                  | forwarded, to subscribe and to refresh                |
 | `events/unsubscribe`                | forwarded                                             |
-| `events/stream` (push)              | not forwarded: `-32601 Method not found`              |
+| `events/stream` (push)              | not forwarded: `-32026 Unsupported`                   |
 | `notifications/events/list_changed` | not delivered: `listChanged` is advertised as `false` |
 
-- **Only when the upstream offers it.** The four methods exist only if the
+- **Only when the upstream offers it.** These methods are answered only if the
   upstream advertises `capabilities.extensions["io.modelcontextprotocol/events"]`
-  (an empty `{}` counts). Otherwise they are `-32601 Method not found`, as
-  before.
+  (an empty `{}` counts). Otherwise every `events/*` request is `-32601 Method
+  not found`, as before.
 - **Passed through, not parsed.** Params and results cross as they are: `null`
   stays distinct from absent (`cursor`, `ttlMs`), and unknown fields and
   `_meta` survive. Errors keep their code, message and `data` for every code
@@ -120,12 +120,13 @@ SEP-3415 compliance: anything the table does not list is not forwarded.
   unsubscribes nothing. A subscription lasts as long as the upstream keeps it:
   until its TTL lapses, someone calls `events/unsubscribe`, or the upstream
   ends it.
-- **No push.** `events/stream` gets `-32601`, which SEP-3415 reads as "no
-  Events support at all", so a client that picks push fails instead of
-  falling back. The SEP's client guidance picks push over poll when no webhook
-  is configured, and the catalog is not rewritten, so any event type that
-  lists `"push"` invites it. Have clients use poll or webhook; event types that
-  offer only push cannot be consumed through the proxy.
+- **No push.** The proxy answers `events/stream` itself with `-32026
+  Unsupported` and `data: { "feature": "deliveryMode", "value": "push" }`:
+  SEP-3415's signal that a delivery mode is not available, so a client can
+  fall back to poll or webhook. (`-32601` would read as "no Events support at
+  all".) The catalog is not rewritten, so event types still list `"push"`, and
+  those that offer only push cannot be consumed through the proxy. Like every
+  SEP-3415 code, `-32026` is provisional until the SEP is accepted.
 - **Upstream revision.** SEP-3415 is defined for `2026-07-28`, so a conformant
   server advertises the extension on `server/discover` only. Run the proxy
   with `--upstreamProtocol auto` (or `modern`). Under the default `legacy`
