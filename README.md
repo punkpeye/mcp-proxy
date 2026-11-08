@@ -238,7 +238,13 @@ stdio servers should also reserve stdout for protocol messages — send diagnost
 
 Expose a local server to the public internet — useful for testing webhooks, sharing a dev server, or remote access.
 
+> [!IMPORTANT]
+> The tunnel uses the optional [`pipenet`](https://github.com/punkpeye/pipenet) package, which `mcp-proxy` no longer installs by default, so library consumers do not inherit its dependency tree. Install it next to the proxy to use `--tunnel` (or globally: `npm install -g mcp-proxy pipenet`); without it the command exits with an install hint.
+
 ```bash
+# --tunnel needs the optional pipenet package
+npm install mcp-proxy pipenet
+
 npx mcp-proxy --port 8080 --tunnel -- tsx server.js
 
 # request a specific subdomain

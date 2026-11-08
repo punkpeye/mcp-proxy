@@ -55,6 +55,7 @@
     "get-port-please": "^3.2.0",
     "jiti": "^2.7.0",
     "jsr": "^0.14.3",
+    "pipenet": "^1.4.3",
     "prettier": "^3.9.10",
     "semantic-release": "^25.0.9",
     "tsdown": "^0.23.5",
@@ -80,7 +81,14 @@
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.4.0",
-    "@modelcontextprotocol/server": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0"
+  },
+  "peerDependencies": {
     "pipenet": "^1.4.3"
+  },
+  "peerDependenciesMeta": {
+    "pipenet": {
+      "optional": true
+    }
   }
 }

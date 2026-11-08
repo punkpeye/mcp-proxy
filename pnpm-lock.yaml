@@ -14,9 +14,6 @@ importers:
       '@modelcontextprotocol/server':
         specifier: ^2.4.0
         version: 2.4.0
-      pipenet:
-        specifier: ^1.4.3
-        version: 1.4.3
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -69,6 +66,9 @@ importers:
       jsr:
         specifier: ^0.14.3
         version: 0.14.3
+      pipenet:
+        specifier: ^1.4.3
+        version: 1.4.3
       prettier:
         specifier: ^3.9.10
         version: 3.9.10

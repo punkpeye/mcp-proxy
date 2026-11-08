@@ -5,7 +5,6 @@ import { EventSource } from "eventsource";
 import { createRequire } from "node:module";
 import { setTimeout } from "node:timers";
 import util from "node:util";
-import { pipenet } from "pipenet";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
@@ -29,6 +28,11 @@ import {
   getUpstreamBridge,
 } from "../upstreamNotifications.js";
 import { watchUpstreamExit } from "../watchUpstreamExit.js";
+import {
+  loadPipenet,
+  type Pipenet,
+  PipenetNotInstalledError,
+} from "./loadPipenet.js";
 
 util.inspect.defaultOptions.depth = 8;
 
@@ -277,6 +281,23 @@ const proxy = async ({ onUpstreamExit }: { onUpstreamExit: () => void }) => {
     },
   );
 
+  if (argv.tunnel) {
+    // Resolve --tunnel's optional dependency before spawning the upstream: a
+    // missing pipenet has to fail here, while nothing is connected yet, instead
+    // of after `connect` has already spawned the child and opened its stdio.
+    try {
+      await loadPipenet();
+    } catch (error) {
+      if (error instanceof PipenetNotInstalledError) {
+        console.error(error.message);
+
+        process.exit(1);
+      }
+
+      throw error;
+    }
+  }
+
   await connect(client, argv.connectionTimeout);
 
   // The one upstream client serves every session and is never reconnected, so
@@ -354,10 +375,15 @@ const proxy = async ({ onUpstreamExit }: { onUpstreamExit: () => void }) => {
     toolsListChanged: () => server.notify.toolsChanged(),
   });
 
-  let tunnel: Awaited<ReturnType<typeof pipenet>> | undefined;
+  let tunnel: Awaited<ReturnType<Pipenet>> | undefined;
 
   if (argv.tunnel) {
     console.info("establishing tunnel via tunnel.gla.ma");
+
+    // The preflight above already proved pipenet is importable, so this load
+    // cannot fail with PipenetNotInstalledError.
+    const pipenet = await loadPipenet();
+
     tunnel = await pipenet({
       host: "https://tunnel.gla.ma",
       port: argv.port,
