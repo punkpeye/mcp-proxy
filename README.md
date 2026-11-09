@@ -219,8 +219,6 @@ options:
 - `--sslCa`: Filename to override the trusted CA certificates
 - `--sslCert`: Cert chains filename in PEM format
 - `--sslKey`: Private keys filename in PEM format
-- `--tunnel`: Expose the proxy via a public tunnel (see [Public Tunnel](#public-tunnel))
-- `--tunnelSubdomain`: Request a specific subdomain for the tunnel (availability not guaranteed)
 - `--corsAddAllowedHeader`: Add a header name to `Access-Control-Allow-Headers` (defaults preserved). Repeat to add multiple. Useful when running with `--apiKey` so browser preflights for `X-API-Key` succeed.
 
 ### Troubleshooting Python stdio servers
@@ -233,28 +231,6 @@ npx mcp-proxy -- python -u -m your_package.mcp_server
 ```
 
 stdio servers should also reserve stdout for protocol messages — send diagnostics to stderr, and use `--debug` for proxy-side logs.
-
-### Public Tunnel
-
-Expose a local server to the public internet — useful for testing webhooks, sharing a dev server, or remote access.
-
-```bash
-npx mcp-proxy --port 8080 --tunnel -- tsx server.js
-
-# request a specific subdomain
-npx mcp-proxy --port 8080 --tunnel --tunnelSubdomain myapp -- tsx server.js
-```
-
-When the tunnel is established, you'll see a message like:
-
-```
-tunnel established at https://abcdefghij.tunnel.gla.ma
-```
-
-> [!NOTE]
-> The requested subdomain may not be available. The actual URL will be displayed when the tunnel is established.
-
-Powered by [pipenet](https://github.com/punkpeye/pipenet), sponsored by [glama.ai](https://glama.ai) — see the [announcement](https://glama.ai/blog/2026-01-19-pipenet).
 
 ### Stateless Mode
 
