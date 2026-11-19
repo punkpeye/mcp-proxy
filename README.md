@@ -416,6 +416,7 @@ Options:
 - `keepAliveTimeout`: HTTP keep-alive timeout in milliseconds for stateful stream sessions (default: 300000)
 - `sessionIdleTimeout`: How long in milliseconds a stateful stream session survives with no stream attached and no requests before it is closed (default: 1800000, 30 minutes). Pass `0` to keep every session until its client sends `DELETE`. See [Abandoned sessions](#abandoned-sessions).
 - `maxBodySize`: Caps how many bytes of a request body the streamable HTTP endpoint and the SSE endpoint's `POST /messages` buffer; larger requests are answered with `413 Payload Too Large` (default: 10485760, 10 MiB). Pass `false` to disable the cap. See [Request body size](#request-body-size).
+- `logger`: Receives the server's own diagnostics through its `info` and `error` methods (default: `console`). FastMCP's `Logger` fits as it is. Session ids are logged as a short hash (the first 8 hex characters of their SHA-256), not as the id itself.
 - `sseEndpoint`: SSE endpoint path (default: "/sse", set to null to disable)
 - `streamEndpoint`: Streamable HTTP endpoint path (default: "/mcp", set to null to disable)
 - `stateless`: Enable stateless mode for HTTP streamable transport (default: false). Applies to the 2025-era leg; protocol revision 2026-07-28 is per-request by construction.

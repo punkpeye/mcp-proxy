@@ -24,7 +24,7 @@ import fs from "fs";
 import http from "http";
 import https from "https";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   AuthConfig,
@@ -221,6 +221,15 @@ export const DEFAULT_ALLOWED_HEADERS = [
 const DEFAULT_MAX_BODY_SIZE = 10_485_760; // 10 MiB
 
 /**
+ * Where `startHTTPServer` writes its own diagnostics. Defaults to `console`.
+ * FastMCP's `Logger` fits as it is.
+ */
+export interface Logger {
+  error(...args: unknown[]): void;
+  info(...args: unknown[]): void;
+}
+
+/**
  * Caps how many bytes of a request body the stream endpoint and the SSE
  * endpoint's `POST /messages` buffer before giving up. `false` (or `0` from
  * the CLI) disables the cap entirely, restoring unbounded buffering - only do
@@ -228,6 +237,14 @@ const DEFAULT_MAX_BODY_SIZE = 10_485_760; // 10 MiB
  * uses `DEFAULT_MAX_BODY_SIZE`.
  */
 export type MaxBodySizeOption = false | number;
+
+/**
+ * Names a session in a log line without giving its id away. The id addresses a
+ * live session, so it stays out of logs; a short hash still lets the lines
+ * about one session be matched up.
+ */
+const sessionLogId = (sessionId: string): string =>
+  createHash("sha256").update(sessionId).digest("hex").slice(0, 8);
 
 /**
  * "Too large" is kept distinct from the `null` that every other unusable body
@@ -242,6 +259,7 @@ type BodyResult =
 export const getBody = (
   request: http.IncomingMessage,
   maxBodySize: MaxBodySizeOption = DEFAULT_MAX_BODY_SIZE,
+  logger: Logger = console,
 ) => {
   return new Promise<BodyResult>((resolve) => {
     if (maxBodySize !== false) {
@@ -282,12 +300,12 @@ export const getBody = (
         try {
           resolve({ body: JSON.parse(body) });
         } catch (error) {
-          console.error("[mcp-proxy] error parsing body", error);
+          logger.error("[mcp-proxy] error parsing body", error);
           resolve({ body: null });
         }
       })
       .on("error", (error) => {
-        console.error("[mcp-proxy] error reading body", error);
+        logger.error("[mcp-proxy] error reading body", error);
         resolve({ body: null });
       })
       .on("close", () => {
@@ -312,15 +330,17 @@ const createJsonRpcErrorResponse = (code: number, message: string) => {
  * limit from a crash.
  */
 const sendPayloadTooLarge = ({
+  logger,
   maxBodySize,
   req,
   res,
 }: {
+  readonly logger: Logger;
   readonly maxBodySize: number;
   readonly req: http.IncomingMessage;
   readonly res: http.ServerResponse;
 }) => {
-  console.error(
+  logger.error(
     `[mcp-proxy] request body too large (exceeds ${maxBodySize} bytes)`,
   );
 
@@ -698,12 +718,14 @@ type AuthenticationOutcome =
 const authenticateRequest = async ({
   authenticate,
   body,
+  logger,
   oauth,
   req,
   res,
 }: {
   readonly authenticate?: (request: http.IncomingMessage) => Promise<unknown>;
   readonly body?: unknown;
+  readonly logger: Logger;
   readonly oauth?: AuthConfig["oauth"];
   readonly req: http.IncomingMessage;
   readonly res: http.ServerResponse;
@@ -766,7 +788,7 @@ const authenticateRequest = async ({
       error instanceof Error
         ? error.message
         : "Unauthorized: Authentication error";
-    console.error("Authentication error:", error);
+    logger.error("Authentication error:", error);
     res.setHeader("Content-Type", "application/json");
 
     // RFC 7235: a 401 always carries a challenge, OAuth config or not
@@ -850,11 +872,13 @@ export type BeforeDispatchHandler<T> = (context: {
 const sendBeforeDispatchError = async ({
   authMiddleware,
   error,
+  logger,
   message,
   res,
 }: {
   readonly authMiddleware: AuthenticationMiddleware;
   readonly error: unknown;
+  readonly logger: Logger;
   readonly message: unknown;
   readonly res: http.ServerResponse;
 }): Promise<void> => {
@@ -875,13 +899,13 @@ const sendBeforeDispatchError = async ({
     }
   } catch (answerError) {
     // A `Response` whose body was already read, say. Falls through to the 500.
-    console.error(
+    logger.error(
       "[mcp-proxy] error answering from beforeDispatch",
       answerError,
     );
   }
 
-  console.error("[mcp-proxy] error in beforeDispatch", error);
+  logger.error("[mcp-proxy] error in beforeDispatch", error);
 
   if (res.headersSent) {
     res.end();
@@ -909,6 +933,7 @@ const answerBeforeDispatch = async <T>({
   authResult,
   beforeDispatch,
   body,
+  logger,
   req,
   res,
   server,
@@ -917,6 +942,7 @@ const answerBeforeDispatch = async <T>({
   readonly authResult: unknown;
   readonly beforeDispatch?: BeforeDispatchHandler<T>;
   readonly body: unknown;
+  readonly logger: Logger;
   readonly req: http.IncomingMessage;
   readonly res: http.ServerResponse;
   readonly server: T;
@@ -946,7 +972,13 @@ const answerBeforeDispatch = async <T>({
         return true;
       }
     } catch (error) {
-      await sendBeforeDispatchError({ authMiddleware, error, message, res });
+      await sendBeforeDispatchError({
+        authMiddleware,
+        error,
+        logger,
+        message,
+        res,
+      });
 
       return true;
     }
@@ -958,6 +990,7 @@ const answerBeforeDispatch = async <T>({
 // Helper function to clean up server resources
 const cleanupServer = async <T extends ServerLike>(
   server: T,
+  logger: Logger,
   onClose?: (server: T) => Promise<void>,
 ) => {
   if (onClose) {
@@ -970,14 +1003,14 @@ const cleanupServer = async <T extends ServerLike>(
     try {
       await onClose(server);
     } catch (error) {
-      console.error("[mcp-proxy] error in onClose", error);
+      logger.error("[mcp-proxy] error in onClose", error);
     }
   }
 
   try {
     await server.close();
   } catch (error) {
-    console.error("[mcp-proxy] error closing server", error);
+    logger.error("[mcp-proxy] error closing server", error);
   }
 };
 
@@ -985,7 +1018,8 @@ const cleanupServer = async <T extends ServerLike>(
 const applyCorsHeaders = (
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  corsOptions?: boolean | CorsOptions,
+  corsOptions: boolean | CorsOptions | undefined,
+  logger: Logger,
 ) => {
   if (!req.headers.origin) {
     return;
@@ -1094,7 +1128,7 @@ const applyCorsHeaders = (
       );
     }
   } catch (error) {
-    console.error("[mcp-proxy] error parsing origin", error);
+    logger.error("[mcp-proxy] error parsing origin", error);
   }
 };
 
@@ -1204,11 +1238,13 @@ const canServeModernRoute = (server: unknown): boolean => {
  */
 const createModernLeg = <T extends ServerLike>({
   createServer,
+  logger,
   onClose,
   onConnect,
   onListenSubscriptions,
 }: {
   createServer: (request: http.IncomingMessage) => Promise<T>;
+  logger: Logger;
   onClose?: (server: T) => Promise<void>;
   onConnect?: (server: T) => Promise<void>;
   onListenSubscriptions?: ListenSubscriptionsHandler;
@@ -1256,7 +1292,7 @@ const createModernLeg = <T extends ServerLike>({
 
       if (onClose) {
         void onClose(server).catch((error: unknown) => {
-          console.error("[mcp-proxy] error in onClose", error);
+          logger.error("[mcp-proxy] error in onClose", error);
         });
       }
     };
@@ -1336,7 +1372,7 @@ const createModernLeg = <T extends ServerLike>({
       // legacy traffic - `handleStreamRequest` routes it there instead.
       legacy: "reject",
       onerror: (error) => {
-        console.error("[mcp-proxy] modern handler error", error);
+        logger.error("[mcp-proxy] modern handler error", error);
       },
     },
   );
@@ -1349,7 +1385,7 @@ const createModernLeg = <T extends ServerLike>({
     try {
       await instance.server.close();
     } catch (error) {
-      console.error("[mcp-proxy] error closing modern instance", error);
+      logger.error("[mcp-proxy] error closing modern instance", error);
     }
 
     instance.teardown();
@@ -1450,6 +1486,7 @@ const trackSessionStream = <T>(
 const reapIdleSessions = async <T>(
   sessions: Record<string, StreamSession<T>>,
   idleTimeout: number,
+  logger: Logger,
 ) => {
   const now = Date.now();
 
@@ -1462,8 +1499,8 @@ const reapIdleSessions = async <T>(
       continue;
     }
 
-    console.log(
-      `[mcp-proxy] closing session ${sessionId}, idle for over ${idleTimeout}ms`,
+    logger.info(
+      `[mcp-proxy] closing session ${sessionLogId(sessionId)}, idle for over ${idleTimeout}ms`,
     );
 
     // Marked before rather than after, because `close()` returns as soon as it
@@ -1483,10 +1520,11 @@ const reapIdleSessions = async <T>(
 const closeWhenResponseEnds = (
   transport: NodeStreamableHTTPServerTransport,
   res: http.ServerResponse,
+  logger: Logger,
 ) => {
   const close = () => {
     transport.close().catch((error: unknown) => {
-      console.error("[mcp-proxy] error closing stateless transport", error);
+      logger.error("[mcp-proxy] error closing stateless transport", error);
     });
   };
 
@@ -1512,6 +1550,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   endpoint,
   eventStore,
   eventStoreMaxEvents,
+  logger,
   maxBodySize,
   modernHandler,
   oauth,
@@ -1530,6 +1569,7 @@ const handleStreamRequest = async <T extends ServerLike>({
   endpoint: string;
   eventStore?: EventStoreOption;
   eventStoreMaxEvents?: number;
+  logger: Logger;
   maxBodySize?: MaxBodySizeOption;
   modernHandler?: ModernLeg<T>;
   oauth?: AuthConfig["oauth"];
@@ -1570,10 +1610,15 @@ const handleStreamRequest = async <T extends ServerLike>({
 
       let server: T;
 
-      const bodyResult = await getBody(req, maxBodySize);
+      const bodyResult = await getBody(req, maxBodySize, logger);
 
       if (bodyResult.tooLarge) {
-        sendPayloadTooLarge({ maxBodySize: bodyResult.limit, req, res });
+        sendPayloadTooLarge({
+          logger,
+          maxBodySize: bodyResult.limit,
+          req,
+          res,
+        });
 
         return true;
       }
@@ -1585,6 +1630,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       const authentication = await authenticateRequest({
         authenticate,
         body,
+        logger,
         oauth,
         req,
         res,
@@ -1638,6 +1684,7 @@ const handleStreamRequest = async <T extends ServerLike>({
               authResult,
               beforeDispatch,
               body,
+              logger,
               req,
               res,
               server: instance.server,
@@ -1676,6 +1723,7 @@ const handleStreamRequest = async <T extends ServerLike>({
             authResult,
             beforeDispatch,
             body,
+            logger,
             req,
             res,
             server,
@@ -1724,11 +1772,11 @@ const handleStreamRequest = async <T extends ServerLike>({
           isCleaningUp = true;
 
           if (!stateless && sid && activeTransports[sid]) {
-            await cleanupServer(server, onClose);
+            await cleanupServer(server, logger, onClose);
             delete activeTransports[sid];
           } else if (stateless) {
             // In stateless mode, always call onClose when transport closes
-            await cleanupServer(server, onClose);
+            await cleanupServer(server, logger, onClose);
           }
         };
 
@@ -1754,7 +1802,7 @@ const handleStreamRequest = async <T extends ServerLike>({
           if (!isCleaningUp) {
             isCleaningUp = true;
 
-            await cleanupServer(server, onClose);
+            await cleanupServer(server, logger, onClose);
           }
 
           throw error;
@@ -1766,6 +1814,7 @@ const handleStreamRequest = async <T extends ServerLike>({
             authResult,
             beforeDispatch,
             body,
+            logger,
             req,
             res,
             server,
@@ -1776,14 +1825,14 @@ const handleStreamRequest = async <T extends ServerLike>({
           if (!isCleaningUp) {
             isCleaningUp = true;
 
-            await cleanupServer(server, onClose);
+            await cleanupServer(server, logger, onClose);
           }
 
           return true;
         }
 
         if (stateless) {
-          closeWhenResponseEnds(transport, res);
+          closeWhenResponseEnds(transport, res, logger);
         }
 
         await transport.handleRequest(req, res, body);
@@ -1812,7 +1861,7 @@ const handleStreamRequest = async <T extends ServerLike>({
 
           isCleaningUp = true;
 
-          await cleanupServer(server, onClose);
+          await cleanupServer(server, logger, onClose);
         };
 
         try {
@@ -1833,7 +1882,7 @@ const handleStreamRequest = async <T extends ServerLike>({
           if (!isCleaningUp) {
             isCleaningUp = true;
 
-            await cleanupServer(server, onClose);
+            await cleanupServer(server, logger, onClose);
           }
 
           throw error;
@@ -1845,6 +1894,7 @@ const handleStreamRequest = async <T extends ServerLike>({
             authResult,
             beforeDispatch,
             body,
+            logger,
             req,
             res,
             server,
@@ -1853,13 +1903,13 @@ const handleStreamRequest = async <T extends ServerLike>({
           if (!isCleaningUp) {
             isCleaningUp = true;
 
-            await cleanupServer(server, onClose);
+            await cleanupServer(server, logger, onClose);
           }
 
           return true;
         }
 
-        closeWhenResponseEnds(transport, res);
+        closeWhenResponseEnds(transport, res, logger);
 
         await transport.handleRequest(req, res, body);
 
@@ -1896,7 +1946,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       // ERR_HTTP_HEADERS_SENT and crash the request, so bail out once committed —
       // mirroring the DELETE and SSE catch guards below.
       if (res.headersSent) {
-        console.error("[mcp-proxy] error handling request after headers sent", error);
+        logger.error("[mcp-proxy] error handling request after headers sent", error);
         res.end();
         return true;
       }
@@ -1913,7 +1963,7 @@ const handleStreamRequest = async <T extends ServerLike>({
         return true;
       }
 
-      console.error("[mcp-proxy] error handling request", error);
+      logger.error("[mcp-proxy] error handling request", error);
 
       res.setHeader("Content-Type", "application/json");
 
@@ -1962,6 +2012,7 @@ const handleStreamRequest = async <T extends ServerLike>({
 
     const authentication = await authenticateRequest({
       authenticate,
+      logger,
       oauth,
       req,
       res,
@@ -1982,12 +2033,12 @@ const handleStreamRequest = async <T extends ServerLike>({
     const lastEventId = req.headers["last-event-id"] as string | undefined;
 
     if (lastEventId) {
-      console.log(
-        `[mcp-proxy] client reconnecting with Last-Event-ID ${lastEventId} for session ID ${sessionId}`,
+      logger.info(
+        `[mcp-proxy] client reconnecting with Last-Event-ID ${lastEventId} for session ${sessionLogId(sessionId)}`,
       );
     } else {
-      console.log(
-        `[mcp-proxy] establishing new SSE stream for session ID ${sessionId}`,
+      logger.info(
+        `[mcp-proxy] establishing new SSE stream for session ${sessionLogId(sessionId)}`,
       );
     }
 
@@ -2002,7 +2053,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       // listener handed to createServer is async and never awaited, so a throw
       // here would reject as an unhandled rejection and leave the response
       // hanging. Settle it instead, mirroring the POST and DELETE catch guards.
-      console.error("[mcp-proxy] error handling stream request", error);
+      logger.error("[mcp-proxy] error handling stream request", error);
 
       if (res.headersSent) {
         res.end();
@@ -2018,7 +2069,7 @@ const handleStreamRequest = async <T extends ServerLike>({
     req.method === "DELETE" &&
     new URL(req.url!, "http://localhost").pathname === endpoint
   ) {
-    console.log("[mcp-proxy] received delete request");
+    logger.info("[mcp-proxy] received delete request");
 
     // Stateless mode holds no sessions, so there is nothing for a DELETE to
     // end. 405 is the spec's answer for a server that does not let clients
@@ -2043,10 +2094,14 @@ const handleStreamRequest = async <T extends ServerLike>({
       return true;
     }
 
-    console.log("[mcp-proxy] received delete request for session", sessionId);
+    logger.info(
+      "[mcp-proxy] received delete request for session",
+      sessionLogId(sessionId),
+    );
 
     const authentication = await authenticateRequest({
       authenticate,
+      logger,
       oauth,
       req,
       res,
@@ -2070,7 +2125,7 @@ const handleStreamRequest = async <T extends ServerLike>({
       // handles server cleanup. No need to call cleanupServer again.
       await activeTransport.transport.handleRequest(req, res);
     } catch (error) {
-      console.error("[mcp-proxy] error handling delete request", error);
+      logger.error("[mcp-proxy] error handling delete request", error);
 
       if (!res.headersSent) {
         res.writeHead(500).end("Error handling delete request");
@@ -2100,6 +2155,7 @@ const handleSSERequest = async <T extends ServerLike>({
   beforeDispatch,
   createServer,
   endpoint,
+  logger,
   maxBodySize,
   oauth,
   onClose,
@@ -2113,6 +2169,7 @@ const handleSSERequest = async <T extends ServerLike>({
   beforeDispatch?: BeforeDispatchHandler<T>;
   createServer: (request: http.IncomingMessage) => Promise<T>;
   endpoint: string;
+  logger: Logger;
   maxBodySize?: MaxBodySizeOption;
   oauth?: AuthConfig["oauth"];
   onClose?: (server: T) => Promise<void>;
@@ -2128,6 +2185,7 @@ const handleSSERequest = async <T extends ServerLike>({
     // credentials at all - one that does not would hand a session to anyone.
     const authentication = await authenticateRequest({
       authenticate,
+      logger,
       oauth,
       req,
       res,
@@ -2167,7 +2225,7 @@ const handleSSERequest = async <T extends ServerLike>({
       }
 
       isCleaningUp = true;
-      await cleanupServer(server, onClose);
+      await cleanupServer(server, logger, onClose);
 
       delete activeTransports[transport.sessionId];
     };
@@ -2188,7 +2246,7 @@ const handleSSERequest = async <T extends ServerLike>({
       }
     } catch (error) {
       if (!closed) {
-        console.error("[mcp-proxy] error connecting to server", error);
+        logger.error("[mcp-proxy] error connecting to server", error);
 
         // This session was published in activeTransports before connect so
         // legacy clients could use the endpoint sent over SSE. A failure here
@@ -2197,7 +2255,7 @@ const handleSSERequest = async <T extends ServerLike>({
         // closing: server.close() closes the transport, which re-enters the
         // response close handler above.
         isCleaningUp = true;
-        await cleanupServer(server, onClose);
+        await cleanupServer(server, logger, onClose);
         delete activeTransports[transport.sessionId];
 
         if (!res.headersSent) {
@@ -2232,10 +2290,10 @@ const handleSSERequest = async <T extends ServerLike>({
 
     // Read here rather than by the SDK, so that `maxBodySize` bounds this
     // endpoint as it does the stream endpoint.
-    const bodyResult = await getBody(req, maxBodySize);
+    const bodyResult = await getBody(req, maxBodySize, logger);
 
     if (bodyResult.tooLarge) {
-      sendPayloadTooLarge({ maxBodySize: bodyResult.limit, req, res });
+      sendPayloadTooLarge({ logger, maxBodySize: bodyResult.limit, req, res });
 
       return true;
     }
@@ -2249,6 +2307,7 @@ const handleSSERequest = async <T extends ServerLike>({
     const authentication = await authenticateRequest({
       authenticate,
       body,
+      logger,
       oauth,
       req,
       res,
@@ -2286,6 +2345,7 @@ const handleSSERequest = async <T extends ServerLike>({
           authResult: authentication.authResult,
           beforeDispatch,
           body,
+          logger,
           req,
           res,
           server: session.server,
@@ -2299,7 +2359,7 @@ const handleSSERequest = async <T extends ServerLike>({
       // The request listener passed to createServer is async and Node does not
       // observe its returned promise. Settle failures here instead of letting
       // a rejected legacy SSE POST become an unhandled rejection.
-      console.error("[mcp-proxy] error handling SSE message", error);
+      logger.error("[mcp-proxy] error handling SSE message", error);
 
       if (res.headersSent) {
         res.end();
@@ -2325,6 +2385,7 @@ export const startHTTPServer = async <T extends ServerLike>({
   eventStoreMaxEvents,
   host = "::",
   keepAliveTimeout = DEFAULT_KEEP_ALIVE_TIMEOUT,
+  logger = console,
   maxBodySize,
   modern = true,
   oauth,
@@ -2372,6 +2433,13 @@ export const startHTTPServer = async <T extends ServerLike>({
   eventStoreMaxEvents?: number;
   host?: string;
   keepAliveTimeout?: number;
+  /**
+   * Receives the server's own diagnostics: requests it could not handle,
+   * callbacks that threw, sessions opened, closed and reaped. Session ids are
+   * logged as a short hash (the first 8 hex characters of their SHA-256), not
+   * as the id itself. Default: `console`.
+   */
+  logger?: Logger;
   /**
    * Caps how many bytes of a request body the stream endpoint and the SSE
    * endpoint's `POST /messages` buffer, bounding the memory a single request
@@ -2463,6 +2531,7 @@ export const startHTTPServer = async <T extends ServerLike>({
     modern && streamEndpoint
       ? createModernLeg({
           createServer,
+          logger,
           onClose,
           onConnect,
           onListenSubscriptions,
@@ -2476,7 +2545,7 @@ export const startHTTPServer = async <T extends ServerLike>({
     ensureUtf8ResponseCharset(res);
 
     // Apply CORS headers
-    applyCorsHeaders(req, res, cors);
+    applyCorsHeaders(req, res, cors, logger);
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -2526,7 +2595,7 @@ export const startHTTPServer = async <T extends ServerLike>({
       try {
         await onUnhandledRequest(req, res);
       } catch (error) {
-        console.error("[mcp-proxy] error handling custom route", error);
+        logger.error("[mcp-proxy] error handling custom route", error);
 
         if (res.headersSent) {
           res.end();
@@ -2559,6 +2628,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         beforeDispatch,
         createServer,
         endpoint: sseEndpoint,
+        logger,
         maxBodySize,
         oauth,
         onClose,
@@ -2582,6 +2652,7 @@ export const startHTTPServer = async <T extends ServerLike>({
         endpoint: streamEndpoint,
         eventStore,
         eventStoreMaxEvents,
+        logger,
         maxBodySize,
         modernHandler,
         oauth,
@@ -2664,12 +2735,13 @@ export const startHTTPServer = async <T extends ServerLike>({
 
             sweeping = true;
 
-            void reapIdleSessions(activeStreamTransports, sessionIdleTimeout)
+            void reapIdleSessions(
+              activeStreamTransports,
+              sessionIdleTimeout,
+              logger,
+            )
               .catch((error: unknown) => {
-                console.error(
-                  "[mcp-proxy] error sweeping idle sessions",
-                  error,
-                );
+                logger.error("[mcp-proxy] error sweeping idle sessions", error);
               })
               .finally(() => {
                 sweeping = false;

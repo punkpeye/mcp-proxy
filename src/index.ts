@@ -8,6 +8,7 @@ export type {
   CorsOptions,
   EventStoreOption,
   ListenSubscriptionsHandler,
+  Logger,
   MaxBodySizeOption,
   SSEServer,
 } from "./startHTTPServer.js";
