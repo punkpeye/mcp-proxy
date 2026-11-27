@@ -3922,6 +3922,93 @@ it("closes the legacy stateless server exactly once when onConnect throws after 
   }
 }, 15_000);
 
+it("releases the server when the transport refuses an initialize", async () => {
+  const port = await getRandomPort();
+  const servers: Server[] = [];
+  const closed: Server[] = [];
+
+  const httpServer = await startHTTPServer({
+    createServer: async () => {
+      const server = new Server(
+        { name: "refused-initialize", version: "1.0.0" },
+        { capabilities: {} },
+      );
+
+      servers.push(server);
+
+      return server;
+    },
+    onClose: async (server) => {
+      closed.push(server);
+    },
+    port,
+  });
+
+  const initialize = (headers: Record<string, string>) =>
+    fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "refused-initialize", version: "1.0.0" },
+          protocolVersion: "2025-03-26",
+        },
+      }),
+      headers,
+      method: "POST",
+    });
+
+  try {
+    // The transport answers both itself, before it assigns a session id: 406
+    // for an Accept without text/event-stream...
+    const notAcceptable = await initialize({
+      accept: "application/json",
+      "content-type": "application/json",
+    });
+
+    expect(notAcceptable.status).toBe(406);
+    expect(notAcceptable.headers.get("mcp-session-id")).toBeNull();
+
+    // ...and 415 for a body that is not sent as JSON.
+    const unsupported = await initialize({
+      accept: "application/json, text/event-stream",
+      "content-type": "text/plain",
+    });
+
+    expect(unsupported.status).toBe(415);
+    expect(unsupported.headers.get("mcp-session-id")).toBeNull();
+
+    expect(servers).toHaveLength(2);
+
+    await vi.waitFor(() => {
+      expect(closed).toHaveLength(2);
+    });
+
+    for (const server of servers) {
+      expect(closed).toContain(server);
+    }
+
+    // An initialize the transport accepts keeps its server. The pause leaves
+    // room for a late or duplicate `onClose` to show up.
+    const accepted = await initialize({
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+    });
+
+    expect(accepted.status).toBe(200);
+    expect(accepted.headers.get("mcp-session-id")).toBeTruthy();
+
+    await accepted.text();
+    await delay(250);
+
+    expect(closed).toHaveLength(2);
+  } finally {
+    await httpServer.close();
+  }
+}, 15_000);
+
 /**
  * Ending a session is the client's job, and 2025-era clients overwhelmingly
  * never do it - they close a laptop or lose a network and are never heard from

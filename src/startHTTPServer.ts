@@ -1837,6 +1837,15 @@ const handleStreamRequest = async <T extends ServerLike>({
 
         await transport.handleRequest(req, res, body);
 
+        // The transport can turn the `initialize` away itself (406, 415) before
+        // it assigns a session id. Never registered, so nothing else would ever
+        // release this server.
+        if (!stateless && !transport.sessionId && !isCleaningUp) {
+          isCleaningUp = true;
+
+          await cleanupServer(server, logger, onClose);
+        }
+
         return true;
       } else if (stateless && !sessionId && !isInitializeRequest(body)) {
         // In stateless mode, handle non-initialize requests by creating a new transport
